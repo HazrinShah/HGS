@@ -1,0 +1,33 @@
+﻿/* ========== HIKER SPECIFIC STYLES ========== */
+
+/* Hiker Background Gradients */
+.hiker-bg {
+  background: linear-gradient(309deg, #006D5B, #101a17);
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+  background-position: center;
+}
+
+.hiker-navbar {
+  background-color: #006D5B;
+}
+
+.hiker-card {
+  background-color: rgba(18, 170, 152, 0.6);
+}
+
+.hiker-btn {
+  background-color: #006D5B !important;
+  color: white !important;
+}
+
+.hiker-btn:hover {
+  background-color: #004d47 !important;
+}
+
+/* Hero Section for Hiker */
+.hiker-hero {
+  padding-top: 400px;
+  background: url("../img/HHomePageBG.jpg") no-repeat center center;
+  background-size: cover;
+}

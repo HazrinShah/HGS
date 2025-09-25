@@ -1,0 +1,1331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Admin - User Management</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.3.0/css/all.min.css" />
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons/font/bootstrap-icons.css" rel="stylesheet" />
+  <style>
+    :root {
+      --primary-color: #571785;
+      --primary-dark: #4a0f6b;
+      --primary-light: #ede6fa;
+      --secondary-color: #4a0f6b;
+      --success-color: #28a745;
+      --warning-color: #ffc107;
+      --danger-color: #dc3545;
+      --dark-color: #343a40;
+      --light-color: #f8f9fa;
+      --header-bg: #571785;
+      --tab-purple: #571785;
+      --tab-purple-light: #ede6fa;
+      --tab-purple-hover: #4a0f6b;
+    }
+    body {
+      background-color: #f5f5f5;
+      font-family: 'Montserrat', sans-serif;
+      margin: 0;
+      padding: 0;
+    }
+    .navbar {
+      background-color: var(--header-bg);
+      padding: 12px 0;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    .navbar-title {
+      font-size: 22px;
+      font-weight: bold;
+      color: rgb(255, 255, 255);
+      margin: 0 auto;
+      text-shadow: 1px 1px 3px rgba(0,0,0,0.2);
+    }
+    .logo {
+      width: 60px;
+      height: 60px;
+      object-fit: contain;
+    }
+    .sidebar {
+      background: linear-gradient(135deg, #571785 0%, #4a0f6b 100%);
+      width: 300px;
+      height: 500px;
+      margin-top: 45px;
+      margin-left: 20px;
+      padding: 20px 10px;
+      border-radius: 25px;
+      box-shadow: 0 8px 32px rgba(87, 23, 133, 0.4);
+      border: 2px solid rgba(255, 255, 255, 0.1);
+      position: relative;
+      flex-shrink: 0;
+      transition: all 0.3s ease;
+    }
+
+    /* Mobile Menu Button */
+    .mobile-menu-btn {
+      display: none;
+      position: fixed;
+      top: 15px;
+      left: 15px;
+      z-index: 1001;
+      background: linear-gradient(135deg, #571785 0%, #4a0f6b 100%);
+      color: white;
+      border: none;
+      border-radius: 12px;
+      padding: 12px;
+      font-size: 1.2rem;
+      box-shadow: 0 4px 12px rgba(87, 23, 133, 0.3);
+      cursor: pointer;
+      transition: all 0.3s ease;
+    }
+
+    /* Mobile responsive - hamburger button positioning */
+    @media (max-width: 768px) {
+      .mobile-menu-btn {
+        top: 15px;
+        left: 15px;
+        position: fixed;
+        z-index: 1001;
+      }
+    }
+
+    .mobile-menu-btn:hover {
+      background: linear-gradient(135deg, #4a0f6b 0%, #3d0a5c 100%);
+      transform: scale(1.05);
+    }
+
+    /* Mobile Overlay */
+    .mobile-overlay {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.5);
+      z-index: 999;
+      transition: opacity 0.3s ease;
+    }
+
+    .mobile-overlay.show {
+      display: block;
+    }
+    .sidebar .menu a {
+      display: flex;
+      align-items: center;
+      padding: 15px 20px;
+      color: #ffffff;
+      font-weight: 600;
+      text-decoration: none;
+      margin-bottom: 8px;
+      border-radius: 12px;
+      transition: all 0.3s ease;
+      border: 1px solid transparent;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .sidebar .menu a::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: -100%;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+      transition: left 0.5s;
+    }
+
+    .sidebar .menu a:hover::before {
+      left: 100%;
+    }
+
+    .sidebar .menu a:hover {
+      background: rgba(255, 255, 255, 0.15);
+      border-color: rgba(255, 255, 255, 0.3);
+      transform: translateX(5px);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    }
+
+    .sidebar .menu a.active {
+      background: rgba(255, 255, 255, 0.2);
+      border-color: rgba(255, 255, 255, 0.4);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    }
+
+    .sidebar .menu i {
+      margin-right: 15px;
+      font-size: 18px;
+      width: 20px;
+      text-align: center;
+    }
+    .main-content {
+      flex-grow: 1;
+      padding: 0;
+    }
+
+    /* Main Container - Matching Guider/Hiker Pattern */
+    .main-container {
+      padding: 2rem;
+      width: 100%;
+      margin: 0;
+      background: linear-gradient(135deg, var(--light-color) 0%, #e2e8f0 100%);
+      min-height: calc(100vh - 80px);
+    }
+
+    .page-header {
+      text-align: center;
+      margin-bottom: 3rem;
+      padding: 2rem 0;
+    }
+
+    .page-title {
+      font-size: 2.5rem;
+      font-weight: 700;
+      color: var(--primary-dark);
+      margin-bottom: 0.5rem;
+      background: linear-gradient(135deg, var(--primary-dark), var(--primary-color));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .page-subtitle {
+      font-size: 1.1rem;
+      color: #64748b;
+      font-weight: 500;
+    }
+    .wrapper {
+      display: flex;
+      min-height: 100vh;
+    }
+    /* Card Container - Matching Guider/Hiker Style */
+    .tab-container {
+      background: var(--card-white);
+      border-radius: 24px;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      backdrop-filter: blur(10px);
+      padding: 2rem;
+      margin-bottom: 2rem;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .tab-container::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 4px;
+      background: linear-gradient(90deg, var(--primary-color), var(--secondary-color), var(--primary-dark));
+    }
+    .custom-tabs {
+      display: flex;
+      gap: 0;
+      margin-bottom: 32px;
+    }
+    .custom-tab {
+      flex: 1;
+      text-align: center;
+      padding: 20px 0 16px 0;
+      font-weight: 700;
+      font-size: 1.1rem;
+      background: linear-gradient(135deg, var(--tab-purple-light) 0%, #f0e8ff 100%);
+      color: #3d2461;
+      border-radius: 18px 18px 0 0;
+      cursor: pointer;
+      border: 3px solid var(--tab-purple-light);
+      border-bottom: none;
+      transition: all 0.3s ease;
+      position: relative;
+      overflow: hidden;
+      box-shadow: 0 4px 8px rgba(108, 59, 184, 0.1);
+    }
+
+    .custom-tab::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: -100%;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(90deg, transparent, rgba(108, 59, 184, 0.1), transparent);
+      transition: left 0.5s;
+    }
+
+    .custom-tab:hover::before {
+      left: 100%;
+    }
+    .custom-tab.active {
+      background: linear-gradient(135deg, var(--tab-purple) 0%, var(--primary-dark) 100%);
+      color: #fff;
+      border: 3px solid var(--tab-purple);
+      border-bottom: none;
+      z-index: 2;
+      box-shadow: 0 6px 12px rgba(108, 59, 184, 0.3);
+      transform: translateY(-2px);
+    }
+    .custom-tab:not(.active):hover {
+      background: linear-gradient(135deg, var(--tab-purple-hover) 0%, var(--primary-dark) 100%);
+      color: #fff;
+      transform: translateY(-1px);
+      box-shadow: 0 4px 8px rgba(108, 59, 184, 0.2);
+    }
+    .tab-content {
+      background: linear-gradient(135deg, #ffffff 0%, #fafbff 100%);
+      border-radius: 0 0 20px 20px;
+      box-shadow: 
+        0 8px 16px rgba(108,59,184,0.08),
+        inset 0 1px 0 rgba(255, 255, 255, 0.8);
+      padding: 35px 30px 30px 30px;
+      border-top: 3px solid var(--tab-purple);
+      min-height: 350px;
+      position: relative;
+    }
+    /* Filter Section Styling - Matching Guider/Hiker Pattern */
+    .search-bar {
+      display: flex;
+      align-items: center;
+      gap: 1.5rem;
+      background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
+      padding: 1.5rem 2rem;
+      border-radius: 20px;
+      box-shadow: 0 8px 25px rgba(87, 23, 133, 0.15);
+      border: 2px solid rgba(87, 23, 133, 0.1);
+      margin-bottom: 2rem;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .search-bar::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 4px;
+      background: linear-gradient(90deg, var(--primary-color), var(--secondary-color), var(--primary-dark));
+    }
+
+    .filter-label {
+      font-weight: 600;
+      color: var(--primary-dark);
+      margin: 0;
+      display: flex;
+      align-items: center;
+    }
+    .filter-input {
+      border: 2px solid rgba(87, 23, 133, 0.2);
+      border-radius: 15px;
+      padding: 0.75rem 1.25rem;
+      font-size: 1rem;
+      background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
+      color: var(--primary-dark);
+      transition: all 0.3s ease;
+      flex: 1;
+      box-shadow: 0 2px 8px rgba(87, 23, 133, 0.1);
+      font-weight: 500;
+    }
+
+    .filter-input:focus {
+      outline: none;
+      border-color: var(--primary-color);
+      box-shadow: 0 0 0 4px rgba(87, 23, 133, 0.15);
+      transform: translateY(-1px);
+    }
+
+    .filter-input:hover {
+      border-color: var(--primary-color);
+      box-shadow: 0 4px 12px rgba(87, 23, 133, 0.15);
+    }
+    .search-bar button {
+      background: linear-gradient(135deg, var(--tab-purple) 0%, var(--primary-dark) 100%);
+      color: #fff;
+      border: none;
+      border-radius: 15px;
+      padding: 0.75rem 1.5rem;
+      font-weight: 700;
+      font-size: 1rem;
+      transition: all 0.3s ease;
+      box-shadow: 0 4px 12px rgba(87, 23, 133, 0.3);
+      position: relative;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+
+    .search-bar button::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: -100%;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+      transition: left 0.5s;
+    }
+
+    .search-bar button:hover::before {
+      left: 100%;
+    }
+
+    .search-bar button:hover {
+      background: linear-gradient(135deg, var(--primary-dark) 0%, #3d0a5c 100%);
+      transform: translateY(-2px);
+      box-shadow: 0 6px 16px rgba(108,59,184,0.3);
+    }
+    /* Table Styling - Modern Guider/Hiker Style */
+    .user-table {
+      width: 100%;
+      border-collapse: separate;
+      border-spacing: 0;
+      border-radius: 20px;
+      overflow: hidden;
+      box-shadow: 0 8px 16px rgba(0, 0, 0, 0.05);
+      border: 1px solid rgba(108, 59, 184, 0.1);
+    }
+
+    .table-header {
+      display: flex;
+      padding: 1rem 1.5rem;
+      background: linear-gradient(135deg, var(--tab-purple-light), #f1f5ff);
+      border-radius: 16px;
+      margin-bottom: 1rem;
+      font-weight: 600;
+      color: var(--primary-dark);
+      box-shadow: 0 2px 8px rgba(108, 59, 184, 0.1);
+    }
+
+    .table-row {
+      display: flex;
+      align-items: center;
+      padding: 1.25rem 1.5rem;
+      background: linear-gradient(135deg, #ffffff, #f8fafc);
+      border-radius: 16px;
+      margin-bottom: 0.75rem;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+      border: 1px solid rgba(108, 59, 184, 0.1);
+      transition: all 0.3s ease;
+    }
+
+    .table-row:hover {
+      box-shadow: 0 8px 25px rgba(108, 59, 184, 0.15);
+      transform: translateY(-2px);
+    }
+    .user-table th {
+      background: #571785;
+      color: #fff;
+      font-weight: 800;
+      text-align: center;
+      padding: 18px 12px;
+      border: none;
+      font-size: 1.1rem;
+      letter-spacing: 0.8px;
+      text-shadow: 1px 1px 2px rgba(0,0,0,0.2);
+    }
+    .user-table td {
+      background: linear-gradient(135deg, #ffffff 0%, #fafbff 100%);
+      text-align: center;
+      padding: 16px 12px;
+      border: none;
+      font-size: 1.05rem;
+      color: #3d2461;
+      font-weight: 500;
+      transition: all 0.3s ease;
+    }
+
+    .user-table tr:hover td {
+      background: linear-gradient(135deg, #f8f9ff 0%, #f0e8ff 100%);
+      transform: scale(1.02);
+    }
+    .user-table tr:last-child td {
+      border-bottom: none;
+    }
+    .user-table tr {
+      border-radius: 0 0 18px 18px;
+    }
+    .user-table th:first-child {
+      border-radius: 12px 0 0 0;
+    }
+    .user-table th:last-child {
+      border-radius: 0 12px 0 0;
+    }
+    .user-table tr:last-child td:first-child {
+      border-radius: 0 0 0 12px;
+    }
+    .user-table tr:last-child td:last-child {
+      border-radius: 0 0 12px 0;
+    }
+    .btn-suspend {
+      background: linear-gradient(135deg, #571785 0%, #4a0f6b 100%);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 6px 12px;
+      font-weight: 600;
+      margin-right: 6px;
+      font-size: 0.85rem;
+      transition: all 0.3s ease;
+      box-shadow: 0 2px 6px rgba(87, 23, 133, 0.3);
+      position: relative;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+
+    .btn-suspend::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: -100%;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+      transition: left 0.5s;
+    }
+
+    .btn-suspend:hover::before {
+      left: 100%;
+    }
+
+    .btn-suspend:hover {
+      background: linear-gradient(135deg, #4a0f6b 0%, #3d0a5c 100%);
+      color: #fff;
+      transform: translateY(-2px);
+      box-shadow: 0 5px 12px rgba(87,23,133,0.4);
+    }
+    .btn-delete {
+      background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 6px 12px;
+      font-weight: 600;
+      margin-right: 6px;
+      font-size: 0.85rem;
+      transition: all 0.3s ease;
+      box-shadow: 0 2px 6px rgba(220,53,69,0.3);
+      position: relative;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+
+    .btn-delete::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: -100%;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+      transition: left 0.5s;
+    }
+
+    .btn-delete:hover::before {
+      left: 100%;
+    }
+
+    .btn-delete:hover {
+      background: linear-gradient(135deg, #b02a37 0%, #a71e2a 100%);
+      transform: translateY(-2px);
+      box-shadow: 0 5px 12px rgba(220,53,69,0.3);
+    }
+
+    .btn-unsuspend {
+      background: linear-gradient(135deg, #28a745 0%, #1e7e34 100%);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 6px 12px;
+      font-weight: 600;
+      margin-right: 6px;
+      font-size: 0.85rem;
+      transition: all 0.3s ease;
+      box-shadow: 0 2px 6px rgba(40,167,69,0.3);
+      position: relative;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+
+    .btn-unsuspend::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: -100%;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+      transition: left 0.5s;
+    }
+
+    .btn-unsuspend:hover::before {
+      left: 100%;
+    }
+
+    .btn-unsuspend:hover {
+      background: linear-gradient(135deg, #1e7e34 0%, #155724 100%);
+      color: #fff;
+      transform: translateY(-2px);
+      box-shadow: 0 5px 12px rgba(40,167,69,0.3);
+    }
+
+    .btn-ban {
+      background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 6px 12px;
+      font-weight: 600;
+      margin-right: 6px;
+      font-size: 0.85rem;
+      transition: all 0.3s ease;
+      box-shadow: 0 2px 6px rgba(220,53,69,0.3);
+      position: relative;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+
+    .btn-ban::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: -100%;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+      transition: left 0.5s;
+    }
+
+    .btn-ban:hover::before {
+      left: 100%;
+    }
+
+    .btn-ban:hover {
+      background: linear-gradient(135deg, #c82333 0%, #a71e2a 100%);
+      color: #fff;
+      transform: translateY(-2px);
+      box-shadow: 0 5px 12px rgba(220,53,69,0.3);
+    }
+
+    .btn-approve {
+      background: linear-gradient(135deg, #28a745 0%, #1e7e34 100%);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 6px 12px;
+      font-weight: 600;
+      margin-right: 6px;
+      font-size: 0.85rem;
+      transition: all 0.3s ease;
+      box-shadow: 0 2px 6px rgba(40,167,69,0.3);
+      position: relative;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+
+    .btn-approve::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: -100%;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+      transition: left 0.5s;
+    }
+
+    .btn-approve:hover::before {
+      left: 100%;
+    }
+
+    .btn-approve:hover {
+      background: linear-gradient(135deg, #1e7e34 0%, #155724 100%);
+      color: #fff;
+      transform: translateY(-2px);
+      box-shadow: 0 5px 12px rgba(40,167,69,0.3);
+    }
+
+    .btn-reject {
+      background: linear-gradient(135deg, #ffc107 0%, #e0a800 100%);
+      color: #212529;
+      border: none;
+      border-radius: 8px;
+      padding: 6px 12px;
+      font-weight: 600;
+      margin-right: 6px;
+      font-size: 0.85rem;
+      transition: all 0.3s ease;
+      box-shadow: 0 2px 6px rgba(255,193,7,0.3);
+      position: relative;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+
+    .btn-reject::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: -100%;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+      transition: left 0.5s;
+    }
+
+    .btn-reject:hover::before {
+      left: 100%;
+    }
+
+    .btn-reject:hover {
+      background: linear-gradient(135deg, #e0a800 0%, #d39e00 100%);
+      color: #212529;
+      transform: translateY(-2px);
+      box-shadow: 0 5px 12px rgba(255,193,7,0.3);
+    }
+
+    /* Action Buttons Container */
+    .action-buttons {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .action-buttons button {
+      white-space: nowrap;
+      min-width: auto;
+    }
+    /* Mobile Responsive Styles */
+    @media (max-width: 768px) {
+      .mobile-menu-btn {
+        display: block;
+      }
+
+      .sidebar {
+        position: fixed;
+        top: 0;
+        left: -320px;
+        width: 280px;
+        height: 100vh;
+        margin: 0;
+        border-radius: 0;
+        z-index: 1000;
+        transition: left 0.3s ease;
+        overflow-y: auto;
+      }
+
+      .sidebar.mobile-open {
+        left: 0;
+      }
+
+      .wrapper {
+        flex-direction: column;
+      }
+
+      .main-content {
+        margin-left: 0;
+        padding: 60px 10px 20px 10px;
+        width: 100%;
+      }
+
+      .main-container {
+        padding: 1rem;
+        width: 100%;
+      }
+
+      .page-header {
+        padding: 1.5rem 1rem;
+        margin-bottom: 2rem;
+      }
+
+      .page-title {
+        font-size: 2rem;
+      }
+
+      .search-bar {
+        flex-direction: column;
+        gap: 1rem;
+        padding: 1rem;
+      }
+
+      .filter-input {
+        width: 100%;
+      }
+
+      .user-table {
+        font-size: 0.9rem;
+      }
+
+      .user-table th, .user-table td {
+        padding: 8px 4px;
+        font-size: 0.85rem;
+      }
+
+      .action-buttons {
+        flex-direction: column;
+        gap: 4px;
+      }
+
+      .action-buttons button {
+        width: 100%;
+        margin-right: 0;
+        margin-bottom: 4px;
+      }
+    }
+
+    @media (max-width: 900px) {
+      .sidebar {
+        width: 100px;
+        padding: 10px 2px;
+      }
+      .main-content {
+        padding: 10px;
+      }
+      .tab-container {
+        padding: 10px 2px 10px 2px;
+        min-width: 0;
+      }
+      .tab-content {
+        padding: 10px 2px 10px 2px;
+      }
+    }
+    @media (max-width: 600px) {
+      .tab-container {
+        padding: 2px 0 2px 0;
+      }
+      .tab-content {
+        padding: 2px 0 2px 0;
+      }
+      .user-table th, .user-table td {
+        padding: 6px 2px;
+        font-size: 0.95rem;
+      }
+    }
+  </style>
+</head>
+<body>
+  <!-- Mobile Menu Button -->
+  <button class="mobile-menu-btn" onclick="toggleMobileMenu()">
+    <i class="bi bi-list"></i>
+  </button>
+
+  <!-- Mobile Overlay -->
+  <div class="mobile-overlay" onclick="closeMobileMenu()"></div>
+
+  <!-- Header -->
+  <header>
+    <nav class="navbar">
+      <div class="container d-flex align-items-center">
+        <a class="navbar-brand d-flex align-items-center" href="../index.html">
+          <img src="../img/logo.png" class="img-fluid logo me-2" alt="HGS Logo" style="width: 50px; height: 50px;">
+          <span class="fs-6 fw-bold text-white">Admin</span>
+        </a>
+        <h1 class="navbar-title ms-auto me-auto">HIKING GUIDANCE SYSTEM</h1>
+      </div>
+    </nav>
+  </header>
+  <!-- End Header -->
+  <div class="wrapper">
+    <!-- Sidebar -->
+    <div class="sidebar">
+      <div class="logo-admin">
+        <strong class="ms-2 text-white">Menu</strong>
+      </div>
+      <div class="menu mt-4">
+        <a href="ADashboard.html"><i class="bi bi-grid-fill"></i> Dashboard</a>
+        <a href="AUser.html" class="active"><i class="bi bi-people-fill"></i> User</a>
+        <a href="AMountain.php"><i class="bi bi-triangle-fill"></i> Mountain</a>
+        <a href="AReport.html"><i class="bi bi-file-earmark-text-fill"></i> Reports</a>
+        <div class="text-center mt-4">
+          <form action="../shared/logout.php" method="POST" class="d-flex justify-content-center">
+            <button class="btn btn-danger logout-btn w-50" type="submit">
+              <i class="bi bi-box-arrow-right"></i> Log Out
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+    <div class="main-content">
+      <div class="main-container">
+        <div class="page-header">
+          <h1 class="page-title">User Management</h1>
+          <p class="page-subtitle">Manage and monitor all registered users in the system</p>
+        </div>
+      <div class="tab-container">
+        <div class="custom-tabs">
+          <div class="custom-tab active" id="tab-alluser" onclick="showTab('alluser')">
+            <i class="bi bi-people-fill me-2"></i>All User
+          </div>
+          <div class="custom-tab" id="tab-validation" onclick="showTab('validation')">
+            <i class="bi bi-file-earmark-text me-2"></i>Validation
+          </div>
+        </div>
+        <div class="tab-content" id="tab-content-alluser">
+          <div class="mb-3 fw-bold fs-5">List of Registered User</div>
+          <div class="search-bar">
+            <div class="filter-label">
+              <i class="bi bi-funnel me-2"></i>Filter & Search
+            </div>
+            <select id="userTypeFilter" class="filter-input" style="min-width: 120px;">
+              <option value="">All Users</option>
+              <option value="hiker">Hikers</option>
+              <option value="guider">Guiders</option>
+            </select>
+            <input type="text" id="searchUser" class="filter-input" placeholder="Find user by username or email...">
+            <button onclick="loadUsers()"><i class="bi bi-search"></i> Search</button>
+          </div>
+          <div class="table-responsive">
+            <table class="user-table">
+              <thead>
+                <tr>
+                  <th>Username</th>
+                  <th>Email</th>
+                  <th>User Type</th>
+                  <th>Status</th>
+                  <th>Rating</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="userTableBody">
+                <!-- User data will be loaded here dynamically -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="tab-content d-none" id="tab-content-validation">
+          <div class="mb-3 fw-bold fs-5">Validation (Coming Soon)</div>
+        </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script>
+    let userData = null;
+
+    // Load users from database
+    async function loadUsers() {
+      try {
+        // Show loading state
+        document.getElementById('userTableBody').innerHTML = 
+          '<tr><td colspan="6" class="text-center text-muted"><i class="bi bi-hourglass-split"></i> Loading users...</td></tr>';
+        
+        const userType = document.getElementById('userTypeFilter').value;
+        const searchTerm = document.getElementById('searchUser').value;
+        
+        let url = 'AUserData.php';
+        const params = new URLSearchParams();
+        if (userType) params.append('user_type', userType);
+        if (searchTerm) params.append('search', searchTerm);
+        if (params.toString()) url += '?' + params.toString();
+
+        const response = await fetch(url);
+        if (!response.ok) {
+          throw new Error('Failed to fetch user data: ' + response.status);
+        }
+        
+        const responseText = await response.text();
+        console.log('API Response:', responseText);
+        
+        try {
+          userData = JSON.parse(responseText);
+        } catch (parseError) {
+          console.error('JSON Parse Error:', parseError);
+          throw new Error('Invalid JSON response from server');
+        }
+        
+        // Check if the response has the expected structure
+        if (!userData || typeof userData !== 'object') {
+          throw new Error('Invalid response format');
+        }
+        
+        if (!userData.users || !Array.isArray(userData.users)) {
+          throw new Error('Users data is missing or invalid');
+        }
+        
+        displayUsers(userData.users);
+        updateUserCounts(userData.user_counts);
+        
+      } catch (error) {
+        console.error('Error loading users:', error);
+        document.getElementById('userTableBody').innerHTML = 
+          `<tr><td colspan="6" class="text-center text-danger">Error loading user data: ${error.message}</td></tr>`;
+      }
+    }
+
+    // Display users in the table
+    function displayUsers(users) {
+      const tbody = document.getElementById('userTableBody');
+      
+      if (users.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No users found</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = users.map(user => {
+        const userTypeBadge = getUserTypeBadge(user.user_type);
+        const statusBadge = getStatusBadge(user.status, user.user_type);
+        const ratingDisplay = getRatingDisplay(user.average_rating, user.total_reviews, user.user_type);
+        
+        return `
+          <tr>
+            <td><strong>${user.username}</strong></td>
+            <td>${user.email}</td>
+            <td>${userTypeBadge}</td>
+            <td>${statusBadge}</td>
+            <td>${ratingDisplay}</td>
+            <td>
+              ${getActionButtons(user)}
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    // Get user type badge
+    function getUserTypeBadge(userType) {
+      const badges = {
+        'hiker': '<span class="badge bg-primary">Hiker</span>',
+        'guider': '<span class="badge bg-success">Guider</span>'
+      };
+      return badges[userType] || '<span class="badge bg-secondary">Unknown</span>';
+    }
+
+    // Get status badge
+    function getStatusBadge(status, userType) {
+      const statusConfig = {
+        'Active': { class: 'bg-success', text: 'Active' },
+        'Inactive': { class: 'bg-warning', text: 'Inactive' },
+        'New User': { class: 'bg-info', text: 'New User' },
+        'Active Guider': { class: 'bg-success', text: 'Active Guider' },
+        'New Guider': { class: 'bg-primary', text: 'New Guider' },
+        'Pending': { class: 'bg-warning', text: 'Pending' },
+        'Suspended': { class: 'bg-danger', text: 'Suspended' },
+        'Banned': { class: 'bg-dark', text: 'Banned' }
+      };
+      
+      const config = statusConfig[status] || { class: 'bg-secondary', text: 'Unknown' };
+      return `<span class="badge ${config.class}">${config.text}</span>`;
+    }
+
+    // Get rating display
+    function getRatingDisplay(averageRating, totalReviews, userType) {
+      if (userType !== 'guider' || !averageRating) {
+        return '<span class="text-muted">-</span>';
+      }
+      
+      const rating = parseFloat(averageRating);
+      if (isNaN(rating)) {
+        return '<span class="text-muted">-</span>';
+      }
+      
+      const stars = '★'.repeat(Math.round(rating)) + '☆'.repeat(5 - Math.round(rating));
+      return `
+        <div>
+          <div class="text-warning">${stars}</div>
+          <small class="text-muted">${rating.toFixed(1)} (${totalReviews || 0} reviews)</small>
+        </div>
+      `;
+    }
+
+    // Get action buttons based on user status
+    function getActionButtons(user) {
+      const status = user.status;
+      const userID = user.userID;
+      const userType = user.user_type;
+      
+      let buttons = '<div class="action-buttons">';
+      
+      if (status === 'Suspended') {
+        buttons += `
+          <button class="btn-unsuspend" onclick="unsuspendUser(${userID}, '${userType}')">
+            <i class="bi bi-play-circle"></i> Unsuspend
+          </button>
+        `;
+      } else if (status === 'Banned') {
+        buttons += `
+          <button class="btn-unsuspend" onclick="unsuspendUser(${userID}, '${userType}')">
+            <i class="bi bi-play-circle"></i> Unban
+          </button>
+        `;
+      } else if (status === 'Pending') {
+        buttons += `
+          <button class="btn-approve" onclick="approveUser(${userID}, '${userType}')">
+            <i class="bi bi-check-circle"></i> Approve
+          </button>
+          <button class="btn-reject" onclick="rejectUser(${userID}, '${userType}')">
+            <i class="bi bi-x-circle"></i> Reject
+          </button>
+        `;
+      } else {
+        buttons += `
+          <button class="btn-suspend" onclick="suspendUser(${userID}, '${userType}')">
+            <i class="bi bi-pause-circle"></i> Suspend
+          </button>
+          <button class="btn-ban" onclick="banUser(${userID}, '${userType}')">
+            <i class="bi bi-x-circle"></i> Ban
+          </button>
+        `;
+      }
+      
+      buttons += `
+        <button class="btn-delete" onclick="deleteUser(${userID}, '${userType}')">
+          <i class="bi bi-trash"></i> Delete
+        </button>
+      </div>`;
+      
+      return buttons;
+    }
+
+    // Update user counts display
+    function updateUserCounts(userCounts) {
+      // You can add user count display here if needed
+      console.log('User counts:', userCounts);
+    }
+
+    // Suspend user function
+    async function suspendUser(userID, userType) {
+      if (confirm(`Are you sure you want to suspend this ${userType}?`)) {
+        try {
+          const response = await fetch('AUpdateUserStatus.php', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              userID: userID,
+              action: 'suspend',
+              userType: userType
+            })
+          });
+          
+          const result = await response.json();
+          
+          if (result.success) {
+            alert(result.message);
+            loadUsers(); // Refresh the user list
+          } else {
+            alert('Error: ' + result.error);
+          }
+        } catch (error) {
+          console.error('Error suspending user:', error);
+          alert('Error suspending user. Please try again.');
+        }
+      }
+    }
+
+    // Unsuspend user function
+    async function unsuspendUser(userID, userType) {
+      if (confirm(`Are you sure you want to unsuspend this ${userType}?`)) {
+        try {
+          const response = await fetch('AUpdateUserStatus.php', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              userID: userID,
+              action: 'unsuspend',
+              userType: userType
+            })
+          });
+          
+          const result = await response.json();
+          
+          if (result.success) {
+            alert(result.message);
+            loadUsers(); // Refresh the user list
+          } else {
+            alert('Error: ' + result.error);
+          }
+        } catch (error) {
+          console.error('Error unsuspending user:', error);
+          alert('Error unsuspending user. Please try again.');
+        }
+      }
+    }
+
+    // Ban user function
+    async function banUser(userID, userType) {
+      if (confirm(`Are you sure you want to BAN this ${userType}? This is a permanent action.`)) {
+        try {
+          const response = await fetch('AUpdateUserStatus.php', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              userID: userID,
+              action: 'ban',
+              userType: userType
+            })
+          });
+          
+          const result = await response.json();
+          
+          if (result.success) {
+            alert(result.message);
+            loadUsers(); // Refresh the user list
+          } else {
+            alert('Error: ' + result.error);
+          }
+        } catch (error) {
+          console.error('Error banning user:', error);
+          alert('Error banning user. Please try again.');
+        }
+      }
+    }
+
+    // Approve user function (for pending users)
+    async function approveUser(userID, userType) {
+      if (confirm(`Are you sure you want to approve this ${userType}? This will activate their account.`)) {
+        try {
+          const response = await fetch('AUpdateUserStatus.php', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              userID: userID,
+              action: 'approve',
+              userType: userType
+            })
+          });
+          
+          const result = await response.json();
+          
+          if (result.success) {
+            alert(result.message);
+            loadUsers(); // Refresh the user list
+          } else {
+            alert('Error: ' + result.error);
+          }
+        } catch (error) {
+          console.error('Error approving user:', error);
+          alert('Error approving user. Please try again.');
+        }
+      }
+    }
+
+    // Reject user function (for pending users)
+    async function rejectUser(userID, userType) {
+      if (confirm(`Are you sure you want to reject this ${userType}? This will ban their account.`)) {
+        try {
+          const response = await fetch('AUpdateUserStatus.php', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              userID: userID,
+              action: 'reject',
+              userType: userType
+            })
+          });
+          
+          const result = await response.json();
+          
+          if (result.success) {
+            alert(result.message);
+            loadUsers(); // Refresh the user list
+          } else {
+            alert('Error: ' + result.error);
+          }
+        } catch (error) {
+          console.error('Error rejecting user:', error);
+          alert('Error rejecting user. Please try again.');
+        }
+      }
+    }
+
+    // Delete user function
+    function deleteUser(userID, userType) {
+      if (confirm(`Are you sure you want to delete this ${userType}? This action cannot be undone.`)) {
+        // TODO: Implement delete functionality
+        alert('Delete functionality will be implemented');
+      }
+    }
+
+    // Tab switching function
+    function showTab(tab) {
+      document.getElementById('tab-alluser').classList.remove('active');
+      document.getElementById('tab-validation').classList.remove('active');
+      document.getElementById('tab-content-alluser').classList.add('d-none');
+      document.getElementById('tab-content-validation').classList.add('d-none');
+      if(tab === 'alluser') {
+        document.getElementById('tab-alluser').classList.add('active');
+        document.getElementById('tab-content-alluser').classList.remove('d-none');
+      } else {
+        document.getElementById('tab-validation').classList.add('active');
+        document.getElementById('tab-content-validation').classList.remove('d-none');
+      }
+    }
+
+    // Mobile menu toggle function
+    function toggleMobileMenu() {
+      const sidebar = document.querySelector('.sidebar');
+      const mobileBtn = document.querySelector('.mobile-menu-btn');
+      const overlay = document.querySelector('.mobile-overlay');
+      
+      sidebar.classList.toggle('mobile-open');
+      overlay.classList.toggle('show');
+      
+      // Change icon based on state
+      const icon = mobileBtn.querySelector('i');
+      if (sidebar.classList.contains('mobile-open')) {
+        icon.className = 'bi bi-x';
+      } else {
+        icon.className = 'bi bi-list';
+      }
+    }
+
+    // Close mobile menu function
+    function closeMobileMenu() {
+      const sidebar = document.querySelector('.sidebar');
+      const mobileBtn = document.querySelector('.mobile-menu-btn');
+      const overlay = document.querySelector('.mobile-overlay');
+      
+      sidebar.classList.remove('mobile-open');
+      overlay.classList.remove('show');
+      
+      const icon = mobileBtn.querySelector('i');
+      icon.className = 'bi bi-list';
+    }
+
+    // Close mobile menu when clicking outside
+    document.addEventListener('click', function(event) {
+      const sidebar = document.querySelector('.sidebar');
+      const mobileBtn = document.querySelector('.mobile-menu-btn');
+      
+      if (window.innerWidth <= 768) {
+        if (!sidebar.contains(event.target) && !mobileBtn.contains(event.target)) {
+          closeMobileMenu();
+        }
+      }
+    });
+
+    // Close mobile menu on window resize
+    window.addEventListener('resize', function() {
+      if (window.innerWidth > 768) {
+        closeMobileMenu();
+      }
+    });
+
+    // Event listeners
+    document.getElementById('searchUser').addEventListener('keyup', function(e) {
+      if(e.key === 'Enter') loadUsers();
+    });
+
+    document.getElementById('userTypeFilter').addEventListener('change', function() {
+      loadUsers();
+    });
+
+    // Load users when page loads
+    document.addEventListener('DOMContentLoaded', function() {
+      loadUsers();
+    });
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html> 

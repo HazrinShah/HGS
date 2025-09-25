@@ -1,0 +1,239 @@
+/* Set Montserrat as the default font for all elements */
+* {
+  font-family: "Montserrat", sans-serif;
+}
+
+/* Style the logo image: resize and round corners */
+img.img-fluid.logo {
+  width: 50px;
+  border-radius: 20px 5px;
+}
+
+    .logo {
+      width: 60px;
+      height: 60px;
+      object-fit: contain;
+    }
+
+/* tukar color menu */
+.offcanvas.offcanvas-start{
+  background-color: #c6c6c6d5;
+}
+/* welcome mesage */
+.welcome{
+  background-color: #b2bfb8;
+}
+
+
+/* title navigaton page  */
+.navbar-title {
+  flex: 1;
+  text-align: center;
+  margin: 0;
+  font-size: 24px;
+  font-weight: bold;
+ 
+}
+
+/* change header color */
+/* .header,
+.navbar {
+  background-color: #95bca7; 
+} */
+
+/* Underline nav link when active or hovered */
+.nav-link.active,
+.nav-link:hover {
+  border-bottom: 2px solid black;
+}
+
+/* Default nav link style with transparent underline */
+.nav-link {
+  border-bottom: 2px solid transparent;
+}
+
+/* ========== HERO SECTION ========== */
+
+/* Style the hero section with padding and background image */
+.hero {
+  padding-top: 400px;
+  background: url("../img/HHomePageBG.jpg") no-repeat center center;
+  background-size: cover;
+}
+
+/* Orange background utility class */
+.bg-green {
+  background-color: #0cb55e;
+}
+
+/* Style for orange buttons */
+.btn-green {
+  background-color: #0cb55e;
+  border: none;
+  color: rgb(0, 0, 0);
+  padding: 15px 25px;
+}
+
+.btn-green:hover {
+  background-color: #0a8947;
+}
+
+/* Remove outline and box-shadow from input, textarea, select when focused */
+input:focus,
+textarea:focus,
+select:focus {
+  outline: none !important;
+  box-shadow: unset !important;
+}
+
+/* Promo banner ID – default visible */
+#promo {
+  cursor: pointer;
+  display: block;
+}
+
+/* Hide inactive promo banner */
+#promo.inactive {
+  display: none;
+}
+
+/* Promo holder – hidden by default */
+#promo-holder {
+  display: none;
+}
+
+/* Show promo holder when active */
+#promo-holder.active {
+  display: block;
+}
+
+/* Set font size of availability form inputs */
+.availability input {
+  font-size: 20px;
+}
+
+/* Position and spacing adjustments for availability section */
+.availability.mt-4 {
+  position: relative;
+  margin: 0px;
+}
+
+/* change green button and its container radius */
+.btn-green {
+    background-color: #28a745; /* or your preferred green */
+    color: rgb(0, 0, 0);
+    border-radius: 10px !important; /* adjust value as needed */
+}
+
+.card {
+    background-color: #b2bfb8 !important;
+    border-radius: 12px !important; /* adjust to taste */
+}
+
+
+/* Utility class for letter-spacing */
+.ls-3 {
+  letter-spacing: 5px;
+}
+
+/* ========== GALLERY SECTION ========== */
+
+/* Create 4-column responsive image grid */
+.gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 20px;
+}
+
+/* Overlay info box inside image holder – hidden by default */
+.info {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.6); /* Dark semi-transparent overlay */
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  transition: 0.6s;
+  transform: translateY(100%);
+}
+
+/* Show the overlay on hover */
+.img-holder:hover .info {
+  transform: translateY(0%);
+}
+
+/* Style paragraph inside hotel icon boxes */
+.hotel-icons p {
+  font-size: 14px;
+}
+
+/* Remove border from navbar toggle button (hamburger) */
+.navbar-toggler {
+  border: unset !important;
+}
+
+/* Remove focus outline and shadow from buttons */
+button:focus {
+  outline: unset !important;
+  box-shadow: unset !important;
+}
+
+/* ========== RESPONSIVE DESIGN (Media Queries) ========== */
+
+@media screen and (max-width: 992px) {
+  /* Change gallery grid to 2 columns on tablets */
+  .gallery-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 20px;
+  }
+}
+
+@media screen and (max-width: 768px) {
+  .navbar-title {
+    font-size: 20px;
+  }
+
+  img.img-fluid.logo {
+    width: 40px;
+  }
+}
+
+
+@media screen and (max-width: 768px) {
+  /* Reduce left/right margin and add top margin to nav items in mobile */
+  li.nav-item.ms-4 {
+    margin-left: 5px !important;
+    margin-top: 10px;
+    margin-right: 5px !important;
+  }
+
+  /* Stack elements vertically in topbar and center align */
+  .topbar .d-flex {
+    flex-direction: column;
+    text-align: center;
+  }
+
+  /* Add margin below the first paragraph in topbar */
+  .topbar p:first-child {
+    margin-bottom: 10px !important;
+  }
+
+  /* Change gallery grid to 1 column on small screens */
+  .gallery-grid {
+    display: grid;
+    grid-template-columns: repeat(1, 1fr);
+    gap: 20px;
+  }
+
+  /* Add padding to reservation columns in small screens */
+  .reservation .col-md-6,
+  .reservation .col-md-3 {
+    padding: 25px !important;
+  }
+}

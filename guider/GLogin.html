@@ -1,0 +1,542 @@
+<!-- <?php
+session_start();
+
+if (!isset($_SESSION['guiderID'])) {
+    echo "Access denied.";
+    exit;
+}
+
+$guiderID = $_SESSION['guiderID'];
+?> -->
+<!-- untuk login php -->
+
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Guider Login - HGS</title>
+
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.3.0/css/all.min.css">
+
+    <style>
+      body {
+        font-family: "Montserrat", sans-serif;
+        margin: 0;
+        padding: 0;
+        overflow-x: hidden;
+        background: linear-gradient(to right, #496eb2, #cfdef3);
+        background-attachment: fixed;
+        min-height: 100vh;
+      }
+
+      /* Guider Blue Color Scheme */
+      :root {
+        --guider-blue: #1e40af;
+        --guider-blue-light: #3b82f6;
+        --guider-blue-dark: #1e3a8a;
+        --guider-blue-accent: #60a5fa;
+        --guider-blue-soft: #dbeafe;
+      }
+
+      /* Login Container */
+      .login-container {
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 2rem 1rem;
+        position: relative;
+      }
+
+      .login-container::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.4);
+        z-index: 1;
+      }
+
+      .login-card {
+        background: rgba(255, 255, 255, 0.95);
+        backdrop-filter: blur(20px);
+        border-radius: 25px;
+        padding: 3rem;
+        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        max-width: 450px;
+        width: 100%;
+        position: relative;
+        z-index: 2;
+      }
+
+      .login-card h1 {
+        font-family: "Montserrat", sans-serif;
+        font-weight: 700;
+        color: var(--guider-blue-dark);
+        text-align: center;
+        margin-bottom: 2rem;
+        font-size: 2rem;
+      }
+
+      .form-label {
+        font-weight: 600;
+        color: var(--guider-blue-dark);
+        margin-bottom: 0.5rem;
+      }
+
+      .form-control {
+        border: 2px solid rgba(30, 64, 175, 0.1);
+        border-radius: 12px;
+        padding: 12px 16px;
+        font-size: 1rem;
+        transition: all 0.3s ease;
+        background: rgba(255, 255, 255, 0.8);
+      }
+
+      .form-control:focus {
+        border-color: var(--guider-blue);
+        box-shadow: 0 0 0 0.2rem rgba(30, 64, 175, 0.25);
+        background: white;
+      }
+
+      .btn-login {
+        background: linear-gradient(135deg, var(--guider-blue), var(--guider-blue-light));
+        border: none;
+        border-radius: 12px;
+        padding: 15px 30px;
+        font-weight: 600;
+        color: white;
+        transition: all 0.3s ease;
+        box-shadow: 0 8px 25px rgba(30, 64, 175, 0.4);
+        width: 100%;
+        font-size: 1.1rem;
+      }
+
+      .btn-login:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 12px 35px rgba(30, 64, 175, 0.6);
+        color: white;
+      }
+
+      .register-link {
+        text-align: center;
+        margin-top: 1.5rem;
+        color: #64748b;
+      }
+
+      .register-link a {
+        color: var(--guider-blue);
+        text-decoration: none;
+        font-weight: 600;
+        transition: all 0.3s ease;
+      }
+
+      .register-link a:hover {
+        color: var(--guider-blue-dark);
+        text-decoration: underline;
+      }
+
+      /* Welcome Section */
+      .welcome-section {
+        text-align: center;
+        margin-bottom: 2rem;
+      }
+
+      .welcome-section .icon {
+        font-size: 3rem;
+        color: var(--guider-blue);
+        margin-bottom: 1rem;
+      }
+
+      .welcome-section p {
+        color: #64748b;
+        margin: 0;
+        font-size: 1rem;
+      }
+
+      /* Responsive Design */
+      @media (max-width: 768px) {
+        .login-card {
+          padding: 2rem 1.5rem;
+          margin: 1rem;
+        }
+        
+        .login-card h1 {
+          font-size: 1.8rem;
+        }
+      }
+
+      @media (max-width: 480px) {
+        .login-card {
+          padding: 1.5rem 1rem;
+        }
+        
+        .login-card h1 {
+          font-size: 1.6rem;
+        }
+        
+        .welcome-section .icon {
+          font-size: 2.5rem;
+        }
+      }
+
+      /* Custom Notification System */
+      .notification-container {
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        z-index: 9999;
+        max-width: 400px;
+      }
+
+      .notification {
+        background: white;
+        border-radius: 12px;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+        margin-bottom: 12px;
+        padding: 16px 20px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        border-left: 4px solid;
+        transform: translateX(100%);
+        opacity: 0;
+        transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        position: relative;
+        overflow: hidden;
+      }
+
+      .notification.show {
+        transform: translateX(0);
+        opacity: 1;
+      }
+
+      .notification.hide {
+        transform: translateX(100%);
+        opacity: 0;
+      }
+
+      .notification.success {
+        border-left-color: #10b981;
+        background: linear-gradient(135deg, #f0fdf4, #ecfdf5);
+      }
+
+      .notification.error {
+        border-left-color: #ef4444;
+        background: linear-gradient(135deg, #fef2f2, #fee2e2);
+      }
+
+      .notification.warning {
+        border-left-color: #f59e0b;
+        background: linear-gradient(135deg, #fffbeb, #fef3c7);
+      }
+
+      .notification.info {
+        border-left-color: var(--guider-blue);
+        background: linear-gradient(135deg, var(--guider-blue-soft), #e0f2fe);
+      }
+
+      .notification-icon {
+        width: 24px;
+        height: 24px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 50%;
+        flex-shrink: 0;
+      }
+
+      .notification.success .notification-icon {
+        background: #10b981;
+        color: white;
+      }
+
+      .notification.error .notification-icon {
+        background: #ef4444;
+        color: white;
+      }
+
+      .notification.warning .notification-icon {
+        background: #f59e0b;
+        color: white;
+      }
+
+      .notification.info .notification-icon {
+        background: var(--guider-blue);
+        color: white;
+      }
+
+      .notification-content {
+        flex: 1;
+        min-width: 0;
+      }
+
+      .notification-title {
+        font-weight: 600;
+        font-size: 14px;
+        margin: 0 0 4px 0;
+        color: #1f2937;
+      }
+
+      .notification-message {
+        font-size: 13px;
+        margin: 0;
+        color: #6b7280;
+        line-height: 1.4;
+      }
+
+      .notification-close {
+        background: none;
+        border: none;
+        color: #9ca3af;
+        cursor: pointer;
+        padding: 4px;
+        border-radius: 4px;
+        transition: all 0.2s ease;
+        flex-shrink: 0;
+      }
+
+      .notification-close:hover {
+        background: rgba(0, 0, 0, 0.1);
+        color: #374151;
+      }
+
+      .notification-progress {
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        height: 3px;
+        background: rgba(0, 0, 0, 0.1);
+        border-radius: 0 0 12px 12px;
+        transition: width linear;
+      }
+
+      .notification.success .notification-progress {
+        background: #10b981;
+      }
+
+      .notification.error .notification-progress {
+        background: #ef4444;
+      }
+
+      .notification.warning .notification-progress {
+        background: #f59e0b;
+      }
+
+      .notification.info .notification-progress {
+        background: var(--guider-blue);
+      }
+
+      /* Mobile Responsive */
+      @media (max-width: 768px) {
+        .notification-container {
+          bottom: 10px;
+          right: 10px;
+          left: 10px;
+          max-width: none;
+        }
+        
+        .notification {
+          margin-bottom: 8px;
+          padding: 12px 16px;
+        }
+      }
+    </style>
+
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <!-- Custom Notification Container -->
+    <div class="notification-container" id="notificationContainer"></div>
+    
+    <!-- Login Section -->
+    <div class="login-container">
+      <div class="login-card">
+        <div class="welcome-section">
+          <div class="icon">
+            <i class="fas fa-compass"></i>
+          </div>
+          <h1>Guider Login</h1>
+          <p>Sign in to manage your hiking services</p>
+        </div>
+        
+        <form id="loginForm" action="GLogin.php" method="POST">
+          <div class="mb-3">
+            <label for="email" class="form-label">
+              <i class="fas fa-envelope me-2"></i>Email Address
+            </label>
+            <input
+              type="email"
+              id="email"
+              name="email"
+              class="form-control"
+              placeholder="Enter your email address"
+              required
+            />
+          </div>
+          <div class="mb-4">
+            <label for="password" class="form-label">
+              <i class="fas fa-lock me-2"></i>Password
+            </label>
+            <input
+              type="password"
+              id="password"
+              name="password"
+              class="form-control"
+              placeholder="Enter your password"
+              required
+            />
+          </div>
+          <button type="submit" class="btn btn-login">
+            <i class="fas fa-sign-in-alt me-2"></i>Sign In
+          </button>
+        </form>
+        
+        <div class="register-link">
+          <p>
+            Don't have an account yet?
+            <a href="GRegister.html">Register Here</a>
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <!-- Custom Notification System -->
+    <script>
+    class NotificationSystem {
+        constructor() {
+            this.container = document.getElementById('notificationContainer');
+            this.notifications = new Map();
+            this.notificationId = 0;
+        }
+
+        show(type, title, message, duration = 5000) {
+            const id = ++this.notificationId;
+            const notification = this.createNotification(id, type, title, message, duration);
+            
+            this.container.appendChild(notification);
+            this.notifications.set(id, notification);
+
+            // Trigger animation
+            setTimeout(() => {
+                notification.classList.add('show');
+            }, 10);
+
+            // Auto remove
+            if (duration > 0) {
+                setTimeout(() => {
+                    this.remove(id);
+                }, duration);
+            }
+
+            return id;
+        }
+
+        createNotification(id, type, title, message, duration) {
+            const notification = document.createElement('div');
+            notification.className = `notification ${type}`;
+            notification.dataset.id = id;
+
+            const icons = {
+                success: 'fa-check-circle',
+                error: 'fa-exclamation-triangle',
+                warning: 'fa-exclamation-circle',
+                info: 'fa-info-circle'
+            };
+
+            notification.innerHTML = `
+                <div class="notification-icon">
+                    <i class="fa-solid ${icons[type]}"></i>
+                </div>
+                <div class="notification-content">
+                    <div class="notification-title">${title}</div>
+                    <div class="notification-message">${message}</div>
+                </div>
+                <button class="notification-close" onclick="notificationSystem.remove(${id})">
+                    <i class="fa-solid fa-times"></i>
+                </button>
+                <div class="notification-progress" style="width: 100%; transition-duration: ${duration}ms;"></div>
+            `;
+
+            // Start progress bar
+            setTimeout(() => {
+                const progressBar = notification.querySelector('.notification-progress');
+                if (progressBar) {
+                    progressBar.style.width = '0%';
+                }
+            }, 10);
+
+            return notification;
+        }
+
+        remove(id) {
+            const notification = this.notifications.get(id);
+            if (notification) {
+                notification.classList.add('hide');
+                setTimeout(() => {
+                    if (notification.parentNode) {
+                        notification.parentNode.removeChild(notification);
+                    }
+                    this.notifications.delete(id);
+                }, 400);
+            }
+        }
+
+        success(title, message, duration) {
+            return this.show('success', title, message, duration);
+        }
+
+        error(title, message, duration) {
+            return this.show('error', title, message, duration);
+        }
+
+        warning(title, message, duration) {
+            return this.show('warning', title, message, duration);
+        }
+
+        info(title, message, duration) {
+            return this.show('info', title, message, duration);
+        }
+    }
+
+    // Initialize notification system
+    const notificationSystem = new NotificationSystem();
+
+    // Show notifications based on URL parameters
+    document.addEventListener('DOMContentLoaded', function() {
+        const urlParams = new URLSearchParams(window.location.search);
+        
+        if (urlParams.get('error') === 'invalid_password') {
+            notificationSystem.error('Login Failed!', 'Invalid password. Please try again.');
+        }
+        
+        if (urlParams.get('error') === 'user_not_found') {
+            notificationSystem.error('Login Failed!', 'No user found with this email.');
+        }
+        
+        if (urlParams.get('success') === 'login') {
+            notificationSystem.success('Welcome!', 'Login successful!');
+        }
+        
+        if (urlParams.get('success') === 'registration') {
+            notificationSystem.success('Account Created!', 'Your guider account has been successfully created. Please sign in with your credentials.');
+        }
+        
+        // Clean URL after showing notification
+        if (window.location.search) {
+            window.history.replaceState({}, document.title, window.location.pathname);
+        }
+    });
+    </script>
+  </body>
+</html>

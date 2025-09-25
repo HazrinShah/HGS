@@ -1,0 +1,237 @@
+ body {
+      background-color: #f8f9fa;
+      font-family: 'Poppins', sans-serif;
+      margin: 0;
+      padding: 0;
+      min-height: 100vh;
+    }
+
+    /* Header */
+    .navbar {
+      background: linear-gradient(to right, #5a7ffb, #3f62d8);
+      padding: 15px 0;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+
+    .navbar-title {
+      font-size: 24px;
+      font-weight: bold;
+      color: white;
+      margin: 0 auto;
+      text-shadow: 1px 1px 3px rgba(0,0,0,0.2);
+    }
+
+    .navbar-brand img.logo {
+      width: 40px;
+    }
+
+    .navbar-toggler {
+      border: none;
+      color: white;
+    }
+
+    .navbar-toggler-icon {
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='%23fff' viewBox='0 0 30 30'%3E%3Cpath d='M4 7h22M4 15h22M4 23h22' stroke='%23fff' stroke-width='2'/%3E%3C/svg%3E");
+    }
+
+    /* Main Container */
+    .main-container {
+      padding: 20px;
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+
+    /* Tabs */
+    .nav-tabs {
+      border-bottom: 2px solid #dee2e6;
+      margin-bottom: 20px;
+    }
+
+    .nav-tabs .nav-link {
+      border: none;
+      color: #495057;
+      font-weight: 500;
+      padding: 10px 20px;
+      margin-right: 5px;
+    }
+
+    .nav-tabs .nav-link:hover {
+      border-color: transparent;
+      color: #3f62d8;
+    }
+
+    .nav-tabs .nav-link.active {
+      color: #3f62d8;
+      background-color: transparent;
+      border-bottom: 3px solid #3f62d8;
+      font-weight: bold;
+    }
+
+    /* Dropdown */
+    .filter-container {
+      display: flex;
+      justify-content: flex-end;
+      margin-bottom: 15px;
+      
+    }
+
+    .filter-container select {
+      border-radius: 8px;
+      border: 1px solid #ced4da;
+      padding: 8px 35px;
+      background-color: white;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+
+    /* Table */
+    .table-container {
+      background-color: white;
+      border-radius: 10px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+      padding: 20px;
+      margin-bottom: 30px;
+    }
+
+    /* Table Headers */
+    .table-header {
+      display: flex;
+      padding: 12px 15px;
+      background-color: #f1f5ff;
+      border-radius: 8px;
+      margin-bottom: 10px;
+      font-weight: bold;
+      color: #495057;
+    }
+
+    /* Table Rows */
+    .table-row {
+      display: flex;
+      align-items: center;
+      padding: 15px;
+      background-color: white;
+      border-radius: 8px;
+      margin-bottom: 10px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+      transition: all 0.2s ease;
+    }
+
+    /* .table-row:hover {
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+      transform: translateY(-2px);
+    } */
+
+    /* Status Badges */
+    .status-badge {
+      padding: 5px 10px;
+      border-radius: 20px;
+      font-size: 0.8rem;
+      font-weight: 600;
+    }
+
+    .status-paid {
+      background-color: #d4edda;
+      color: #155724;
+    }
+
+    .status-unpaid {
+      background-color: #f8d7da;
+      color: #721c24;
+    }
+
+    /* Custom Buttons */
+    .btn-details {
+      background-color: #3f62d8;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      padding: 6px 12px;
+      font-size: 0.8rem;
+      margin-right: 5px;
+      transition: all 0.2s ease;
+    }
+
+    .btn-details:hover {
+      background-color: #2e4db3;
+    }
+
+    .btn-cancel {
+      background-color: #dc3545;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      padding: 6px 12px;
+      font-size: 0.8rem;
+      transition: all 0.2s ease;
+    }
+
+    .btn-cancel:hover {
+      background-color: #bb2d3b;
+    }
+
+    /* Footer */
+    .footer {
+      text-align: center;
+      padding: 20px;
+      color: #6c757d;
+      font-size: 0.9rem;
+    }
+
+    /* Responsive adjustments */
+    @media (max-width: 992px) {
+      .table-header, .table-row {
+        flex-wrap: wrap;
+      }
+      
+      .col {
+        flex: 0 0 50%;
+        max-width: 50%;
+        margin-bottom: 5px;
+      }
+      
+      .col-action {
+        flex: 0 0 100%;
+        max-width: 100%;
+        margin-top: 10px;
+      }
+    }
+
+    @media (max-width: 576px) {
+      .col {
+        flex: 0 0 100%;
+        max-width: 100%;
+      }
+      
+      .navbar-title {
+        font-size: 18px;
+      }
+    }
+
+    /* Column widths */
+    .col-bookingid {
+      flex: 0 0 8%;
+    }
+    
+    .col-name {
+      flex: 0 0 15%;
+    }
+    
+    .col-date {
+      flex: 0 0 12%;
+    }
+    
+    .col-location {
+      flex: 0 0 20%;
+    }
+    
+    .col-amount {
+      flex: 0 0 10%;
+    }
+    
+    .col-status {
+      flex: 0 0 10%;
+    }
+    
+    .col-action {
+      flex: 0 0 15%;
+      text-align: center;
+    }

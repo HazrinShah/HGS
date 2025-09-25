@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Admin Login - HGS</title>
+
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.3.0/css/all.min.css">
+
+  <style>
+    body {
+      font-family: "Montserrat", sans-serif;
+      margin: 0;
+      padding: 0;
+      overflow-x: hidden;
+      background: linear-gradient(to right, #496eb2, #cfdef3);
+      background-attachment: fixed;
+      min-height: 100vh;
+    }
+
+    /* Guider Blue Color Scheme */
+    :root {
+      --guider-blue: #1e40af;
+      --guider-blue-light: #3b82f6;
+      --guider-blue-dark: #1e3a8a;
+      --guider-blue-accent: #60a5fa;
+      --guider-blue-soft: #dbeafe;
+    }
+
+    /* Login Container */
+    .login-container {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem 1rem;
+      position: relative;
+    }
+
+    .login-container::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.4);
+      z-index: 1;
+    }
+
+    .login-card {
+      background: rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(20px);
+      border-radius: 25px;
+      padding: 3rem;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      max-width: 450px;
+      width: 100%;
+      position: relative;
+      z-index: 2;
+    }
+
+    .login-card h1 {
+      font-family: "Montserrat", sans-serif;
+      font-weight: 700;
+      color: var(--guider-blue-dark);
+      text-align: center;
+      margin-bottom: 2rem;
+      font-size: 2rem;
+    }
+
+    .form-label {
+      font-weight: 600;
+      color: var(--guider-blue-dark);
+      margin-bottom: 0.5rem;
+    }
+
+    .form-control {
+      border: 2px solid rgba(30, 64, 175, 0.1);
+      border-radius: 12px;
+      padding: 12px 16px;
+      font-size: 1rem;
+      transition: all 0.3s ease;
+      background: rgba(255, 255, 255, 0.8);
+    }
+
+    .form-control:focus {
+      border-color: var(--guider-blue);
+      box-shadow: 0 0 0 0.2rem rgba(30, 64, 175, 0.25);
+      background: white;
+    }
+
+    .btn-login {
+      background: linear-gradient(135deg, var(--guider-blue), var(--guider-blue-light));
+      border: none;
+      border-radius: 12px;
+      padding: 15px 30px;
+      font-weight: 600;
+      color: white;
+      transition: all 0.3s ease;
+      box-shadow: 0 8px 25px rgba(30, 64, 175, 0.4);
+      width: 100%;
+      font-size: 1.1rem;
+    }
+
+    .btn-login:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 12px 35px rgba(30, 64, 175, 0.6);
+      color: white;
+    }
+
+    /* Welcome Section */
+    .welcome-section {
+      text-align: center;
+      margin-bottom: 2rem;
+    }
+
+    .welcome-section .icon {
+      font-size: 3rem;
+      color: var(--guider-blue);
+      margin-bottom: 1rem;
+    }
+
+    .welcome-section p {
+      color: #64748b;
+      margin: 0;
+      font-size: 1rem;
+    }
+
+    /* Responsive Design */
+    @media (max-width: 768px) {
+      .login-card {
+        padding: 2rem 1.5rem;
+        margin: 1rem;
+      }
+      
+      .login-card h1 {
+        font-size: 1.8rem;
+      }
+    }
+
+    @media (max-width: 480px) {
+      .login-card {
+        padding: 1.5rem 1rem;
+      }
+      
+      .login-card h1 {
+        font-size: 1.6rem;
+      }
+      
+      .welcome-section .icon {
+        font-size: 2.5rem;
+      }
+    }
+  </style>
+
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
+</head>
+<body>
+  <!-- Login Section -->
+  <div class="login-container">
+    <div class="login-card">
+      <div class="welcome-section">
+        <div class="icon">
+          <i class="fas fa-user-shield"></i>
+        </div>
+        <h1>Admin Login</h1>
+        <p>Sign in to access admin dashboard</p>
+      </div>
+      
+      <form action="ALogin.php" method="POST">
+        <div class="mb-3">
+          <label for="email" class="form-label">
+            <i class="fas fa-envelope me-2"></i>Email Address
+          </label>
+          <input
+            type="email"
+            id="email"
+            name="email"
+            class="form-control"
+            placeholder="Enter your email address"
+            required
+          />
+        </div>
+        <div class="mb-4">
+          <label for="password" class="form-label">
+            <i class="fas fa-lock me-2"></i>Password
+          </label>
+          <input
+            type="password"
+            id="password"
+            name="password"
+            class="form-control"
+            placeholder="Enter your password"
+            required
+          />
+        </div>
+        <button type="submit" class="btn btn-login">
+          <i class="fas fa-sign-in-alt me-2"></i>Sign In
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

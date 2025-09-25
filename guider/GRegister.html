@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Guider Registration - HGS</title>
+
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.3.0/css/all.min.css">
+
+    <style>
+      body {
+        font-family: "Montserrat", sans-serif;
+        margin: 0;
+        padding: 0;
+        overflow-x: hidden;
+        background: linear-gradient(to right, #496eb2, #cfdef3);
+        background-attachment: fixed;
+        min-height: 100vh;
+      }
+
+      /* Guider Blue Color Scheme */
+      :root {
+        --guider-blue: #1e40af;
+        --guider-blue-light: #3b82f6;
+        --guider-blue-dark: #1e3a8a;
+        --guider-blue-accent: #60a5fa;
+        --guider-blue-soft: #dbeafe;
+      }
+
+      /* Registration Container */
+      .register-container {
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 2rem 1rem;
+        position: relative;
+      }
+
+      .register-container::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.4);
+        z-index: 1;
+      }
+
+      .register-card {
+        background: rgba(255, 255, 255, 0.95);
+        backdrop-filter: blur(20px);
+        border-radius: 25px;
+        padding: 3rem;
+        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        max-width: 600px;
+        width: 100%;
+        position: relative;
+        z-index: 2;
+      }
+
+      .register-card h1 {
+        font-family: "Montserrat", sans-serif;
+        font-weight: 700;
+        color: var(--guider-blue-dark);
+        text-align: center;
+        margin-bottom: 2rem;
+        font-size: 2rem;
+      }
+
+      .form-label {
+        font-weight: 600;
+        color: var(--guider-blue-dark);
+        margin-bottom: 0.5rem;
+      }
+
+      .form-control, .form-select {
+        border: 2px solid rgba(30, 64, 175, 0.1);
+        border-radius: 12px;
+        padding: 12px 16px;
+        font-size: 1rem;
+        transition: all 0.3s ease;
+        background: rgba(255, 255, 255, 0.8);
+      }
+
+      .form-control:focus, .form-select:focus {
+        border-color: var(--guider-blue);
+        box-shadow: 0 0 0 0.2rem rgba(30, 64, 175, 0.25);
+        background: white;
+      }
+      
+      .form-text {
+        font-size: 0.875rem;
+        color: #6c757d;
+        margin-top: 0.25rem;
+        display: block;
+      }
+
+      .btn-register {
+        background: linear-gradient(135deg, var(--guider-blue), var(--guider-blue-light));
+        border: none;
+        border-radius: 12px;
+        padding: 15px 30px;
+        font-weight: 600;
+        color: white;
+        transition: all 0.3s ease;
+        box-shadow: 0 8px 25px rgba(30, 64, 175, 0.4);
+        width: 100%;
+        font-size: 1.1rem;
+      }
+
+      .btn-register:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 12px 35px rgba(30, 64, 175, 0.6);
+        color: white;
+      }
+
+      .login-link {
+        text-align: center;
+        margin-top: 1.5rem;
+        color: #64748b;
+      }
+
+      .login-link a {
+        color: var(--guider-blue);
+        text-decoration: none;
+        font-weight: 600;
+        transition: all 0.3s ease;
+      }
+
+      .login-link a:hover {
+        color: var(--guider-blue-dark);
+        text-decoration: underline;
+      }
+
+      /* Welcome Section */
+      .welcome-section {
+        text-align: center;
+        margin-bottom: 2rem;
+      }
+
+      .welcome-section .icon {
+        font-size: 3rem;
+        color: var(--guider-blue);
+        margin-bottom: 1rem;
+      }
+
+      .welcome-section p {
+        color: #64748b;
+        margin: 0;
+        font-size: 1rem;
+      }
+
+      /* Form Row Layout */
+      .form-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1rem;
+      }
+
+      @media (max-width: 576px) {
+        .form-row {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      /* File Upload Styling */
+      .file-upload-wrapper {
+        position: relative;
+        display: inline-block;
+        width: 100%;
+      }
+
+      .file-upload-label {
+        display: block;
+        padding: 12px 16px;
+        background: rgba(255, 255, 255, 0.8);
+        border: 2px solid rgba(30, 64, 175, 0.1);
+        border-radius: 12px;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        text-align: center;
+        color: #64748b;
+      }
+
+      .file-upload-label:hover {
+        background: white;
+        border-color: var(--guider-blue);
+      }
+
+      .file-upload-input {
+        position: absolute;
+        left: -9999px;
+      }
+
+      /* Responsive Design */
+      @media (max-width: 768px) {
+        .register-card {
+          padding: 2rem 1.5rem;
+          margin: 1rem;
+        }
+        
+        .register-card h1 {
+          font-size: 1.8rem;
+        }
+      }
+
+      @media (max-width: 480px) {
+        .register-card {
+          padding: 1.5rem 1rem;
+        }
+        
+        .register-card h1 {
+          font-size: 1.6rem;
+        }
+        
+        .welcome-section .icon {
+          font-size: 2.5rem;
+        }
+      }
+    </style>
+
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <!-- Registration Section -->
+    <div class="register-container">
+      <div class="register-card">
+        <div class="welcome-section">
+          <div class="icon">
+            <i class="fas fa-compass"></i>
+          </div>
+          <h1>Become a Guider</h1>
+          <p>Join our team of professional hiking guiders</p>
+        </div>
+        
+        <form id="regForm" action="GRegister.php" method="POST" enctype="multipart/form-data">
+          <div class="form-row">
+            <div class="mb-3">
+              <label for="username" class="form-label">
+                <i class="fas fa-user me-2"></i>Username
+              </label>
+              <input
+                type="text"
+                id="username"
+                name="username"
+                class="form-control"
+                placeholder="Enter your username"
+                required
+              />
+            </div>
+
+            <div class="mb-3">
+              <label for="gender" class="form-label">
+                <i class="fas fa-venus-mars me-2"></i>Gender
+              </label>
+              <select name="gender" id="gender" class="form-select" required>
+                <option value="">Select Gender</option>
+                <option value="Male">Male</option>
+                <option value="Female">Female</option>
+                <option value="Other">Other</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="mb-3">
+            <label for="email" class="form-label">
+              <i class="fas fa-envelope me-2"></i>Email Address
+            </label>
+            <input
+              type="email"
+              id="email"
+              name="email"
+              class="form-control"
+              placeholder="your-email@gmail.com"
+              required
+            />
+            <small class="form-text text-muted">Use a real email address (Gmail, Yahoo, Hotmail, etc.)</small>
+          </div>
+
+          <div class="mb-3">
+            <label for="phone_number" class="form-label">
+              <i class="fas fa-phone me-2"></i>Phone Number
+            </label>
+            <input
+              type="text"
+              name="phone_number"
+              id="phone_number"
+              class="form-control"
+              placeholder="Enter your phone number"
+              required
+            />
+          </div>
+
+          <div class="mb-3">
+            <label for="certificate" class="form-label">
+              <i class="fas fa-certificate me-2"></i>Guiding Certificate
+            </label>
+            <div class="file-upload-wrapper">
+              <label for="certificate" class="file-upload-label">
+                <i class="fas fa-upload me-2"></i>
+                <span id="file-name">Choose certificate file (PNG, JPG, PDF)</span>
+              </label>
+              <input
+                type="file"
+                name="certificate"
+                id="certificate"
+                class="file-upload-input"
+                accept=".png, .jpg, .jpeg, .pdf"
+                required
+              />
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="mb-3">
+              <label for="password" class="form-label">
+                <i class="fas fa-lock me-2"></i>Password
+              </label>
+              <input
+                type="password"
+                id="password"
+                name="password"
+                class="form-control"
+                placeholder="Create a password"
+                required
+              />
+            </div>
+
+            <div class="mb-4">
+              <label for="confirmPassword" class="form-label">
+                <i class="fas fa-lock me-2"></i>Confirm Password
+              </label>
+              <input 
+                type="password"
+                name="confirmPassword"
+                id="confirmPassword"
+                class="form-control"
+                placeholder="Confirm your password"
+                required
+              />
+            </div>
+          </div>
+
+          <button type="submit" class="btn btn-register">
+            <i class="fas fa-compass me-2"></i>Register as Guider
+          </button>
+        </form>
+        
+        <div class="login-link">
+          <p>
+            Already have an account?
+            <a href="GLogin.html">Sign In</a>
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <!-- Custom Notification System -->
+    <script>
+    class NotificationSystem {
+        constructor() {
+            this.container = document.getElementById('notificationContainer');
+            this.notifications = new Map();
+            this.notificationId = 0;
+        }
+
+        show(type, title, message, duration = 5000) {
+            const id = ++this.notificationId;
+            const notification = this.createNotification(id, type, title, message, duration);
+            
+            this.container.appendChild(notification);
+            this.notifications.set(id, notification);
+
+            // Trigger animation
+            setTimeout(() => {
+                notification.classList.add('show');
+            }, 10);
+
+            // Auto remove
+            if (duration > 0) {
+                setTimeout(() => {
+                    this.remove(id);
+                }, duration);
+            }
+
+            return id;
+        }
+
+        createNotification(id, type, title, message, duration) {
+            const notification = document.createElement('div');
+            notification.className = `notification ${type}`;
+            notification.dataset.id = id;
+
+            const icons = {
+                success: 'fa-check-circle',
+                error: 'fa-exclamation-triangle',
+                warning: 'fa-exclamation-circle',
+                info: 'fa-info-circle'
+            };
+
+            notification.innerHTML = `
+                <div class="notification-icon">
+                    <i class="fa-solid ${icons[type]}"></i>
+                </div>
+                <div class="notification-content">
+                    <div class="notification-title">${title}</div>
+                    <div class="notification-message">${message}</div>
+                </div>
+                <button class="notification-close" onclick="notificationSystem.remove(${id})">
+                    <i class="fa-solid fa-times"></i>
+                </button>
+                <div class="notification-progress" style="width: 100%; transition-duration: ${duration}ms;"></div>
+            `;
+
+            // Start progress bar
+            setTimeout(() => {
+                const progressBar = notification.querySelector('.notification-progress');
+                if (progressBar) {
+                    progressBar.style.width = '0%';
+                }
+            }, 10);
+
+            return notification;
+        }
+
+        remove(id) {
+            const notification = this.notifications.get(id);
+            if (notification) {
+                notification.classList.add('hide');
+                setTimeout(() => {
+                    if (notification.parentNode) {
+                        notification.parentNode.removeChild(notification);
+                    }
+                    this.notifications.delete(id);
+                }, 400);
+            }
+        }
+
+        success(title, message, duration) {
+            return this.show('success', title, message, duration);
+        }
+
+        error(title, message, duration) {
+            return this.show('error', title, message, duration);
+        }
+
+        warning(title, message, duration) {
+            return this.show('warning', title, message, duration);
+        }
+
+        info(title, message, duration) {
+            return this.show('info', title, message, duration);
+        }
+    }
+
+    // Initialize notification system
+    const notificationSystem = new NotificationSystem();
+
+    // Show notifications based on URL parameters
+    document.addEventListener('DOMContentLoaded', function() {
+        const urlParams = new URLSearchParams(window.location.search);
+        
+        if (urlParams.get('error') === 'email_exists') {
+            notificationSystem.error('Registration Failed!', 'Email is already registered. Please use a different email.');
+            // Clean URL
+            window.history.replaceState({}, document.title, window.location.pathname);
+        }
+        
+        if (urlParams.get('error') === 'phone_exists') {
+            notificationSystem.error('Registration Failed!', 'This phone number is already registered. Please use a different phone number.');
+            // Clean URL
+            window.history.replaceState({}, document.title, window.location.pathname);
+        }
+        
+        if (urlParams.get('error') === 'invalid_phone') {
+            const message = urlParams.get('message') || 'Invalid phone number';
+            notificationSystem.error('Invalid Phone Number!', message);
+            // Clean URL
+            window.history.replaceState({}, document.title, window.location.pathname);
+        }
+        
+        if (urlParams.get('error') === 'upload_failed') {
+            const message = urlParams.get('message') || 'File upload failed';
+            notificationSystem.error('Upload Failed!', message);
+            // Clean URL
+            window.history.replaceState({}, document.title, window.location.pathname);
+        }
+        
+        if (urlParams.get('error') === 'registration_failed') {
+            const message = urlParams.get('message') || 'Registration failed';
+            notificationSystem.error('Registration Failed!', message);
+            // Clean URL
+            window.history.replaceState({}, document.title, window.location.pathname);
+        }
+        
+        if (urlParams.get('error') === 'no_post_data') {
+            notificationSystem.error('Form Error!', 'No form data received. Please try again.');
+            // Clean URL
+            window.history.replaceState({}, document.title, window.location.pathname);
+        }
+        
+        if (urlParams.get('error') === 'invalid_email') {
+            const message = urlParams.get('message') || 'Invalid email address';
+            
+            // Check for specific error types and show appropriate messages
+            if (message.includes('does not exist') || message.includes('not deliverable')) {
+                notificationSystem.error('Email Not Found!', 'This email address does not exist. Please use a real email address like Gmail, Yahoo, or Hotmail.');
+            } else if (message.includes('Disposable email')) {
+                notificationSystem.error('Temporary Email Not Allowed!', 'Please use a permanent email address. Temporary/disposable emails are not accepted.');
+            } else if (message.includes('domain does not exist')) {
+                notificationSystem.error('Invalid Email Domain!', 'The email domain does not exist. Please check your email address and try again.');
+            } else {
+                notificationSystem.error('Email Validation Failed!', message);
+            }
+            
+            // Clean URL
+            window.history.replaceState({}, document.title, window.location.pathname);
+        }
+        
+        if (urlParams.get('success') === 'registration') {
+            notificationSystem.success('Account Created!', 'Your guider account has been successfully created. You can now sign in.');
+            // Clean URL
+            window.history.replaceState({}, document.title, window.location.pathname);
+        }
+    });
+    
+    // File upload name display
+      document.getElementById('certificate').addEventListener('change', function(e) {
+        const fileName = e.target.files[0]?.name || 'Choose certificate file (PNG, JPG, PDF)';
+        document.getElementById('file-name').textContent = fileName;
+      });
+
+      // Form validation
+      document.getElementById('regForm').addEventListener('submit', function(e) {
+        const password = document.getElementById('password').value;
+        const confirmPassword = document.getElementById('confirmPassword').value;
+        
+        if (password !== confirmPassword) {
+          e.preventDefault();
+          notificationSystem.error('Validation Error!', 'Passwords do not match. Please try again.');
+        }
+      });
+    </script>
+  </body>
+</html>
