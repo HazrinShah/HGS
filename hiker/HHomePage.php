@@ -13,6 +13,23 @@ if (!isset($_SESSION['username'])) {
   exit();
 }
 
+include '../shared/db_connection.php';
+$displayName = $_SESSION['username'];
+if ($conn && isset($hikerID)) {
+  if ($stmt = $conn->prepare("SELECT username FROM hiker WHERE hikerID = ?")) {
+    $stmt->bind_param("i", $hikerID);
+    if ($stmt->execute()) {
+      $res = $stmt->get_result();
+      if ($row = $res->fetch_assoc()) {
+        if (!empty($row['username'])) {
+          $displayName = $row['username'];
+        }
+      }
+    }
+    $stmt->close();
+  }
+}
+if ($conn) { $conn->close(); }
 ?>
 
 
@@ -582,11 +599,12 @@ if (!isset($_SESSION['username'])) {
     </div>
   </nav>
 </header>
+<?php include_once '../shared/suspension_banner.php'; ?>
 
 <!-- Hero Section with Mountain Background -->
 <section class="hero-section">
     <div class="hero-content">
-        <h1 class="hero-title">Welcome, <span class="username-highlight"><?php echo $_SESSION['username']; ?></span>!</h1>
+        <h1 class="hero-title">Welcome, <span class="username-highlight"><?php echo htmlspecialchars($displayName); ?></span>!</h1>
         <p class="hero-subtitle">
             Ready for your next hiking adventure? Explore Johor's beautiful mountains with our experienced guiders.
         </p>
@@ -836,3 +854,4 @@ document.addEventListener('DOMContentLoaded', function() {
 
 </body>
 </html>
+

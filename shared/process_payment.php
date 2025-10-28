@@ -37,6 +37,48 @@ if (!$booking) {
     exit;
 }
 
+// If open group, recalculate final amount based on final group size at closure
+if ($booking['groupType'] === 'open') {
+    // Determine group closure and final size: include pending/accepted/paid to lock seats
+    $stmtGrp = $conn->prepare("\n        SELECT COALESCE(SUM(b2.totalHiker),0) AS finalSize, MIN(b2.created_at) AS groupStart\n        FROM booking b2\n        WHERE b2.mountainID = ?\n          AND b2.guiderID = ?\n          AND b2.groupType = 'open'\n          AND b2.startDate <= ?\n          AND b2.endDate >= ?\n          AND b2.status IN ('pending','accepted','paid')\n    ");
+    $stmtGrp->bind_param('iiss', $booking['mountainID'], $booking['guiderID'], $booking['endDate'], $booking['startDate']);
+    $stmtGrp->execute();
+    $grp = $stmtGrp->get_result()->fetch_assoc();
+    $stmtGrp->close();
+
+    $finalSize = max(1, (int)($grp['finalSize'] ?? 1));
+    $groupStartTs = isset($grp['groupStart']) && $grp['groupStart'] ? strtotime($grp['groupStart']) : time();
+    $recruitDeadlineTs = $groupStartTs + (3 * 60);
+    $isClosed = ($finalSize >= 7) || (time() >= $recruitDeadlineTs);
+    $closureTs = ($finalSize >= 7) ? time() : $recruitDeadlineTs;
+    $paymentDeadlineTs = $closureTs + (5 * 60);
+
+    if (!$isClosed) {
+        // Safety: do not allow payment if group not closed
+        header("Location: ../hiker/HPayment.php?error=group_not_closed");
+        exit;
+    }
+
+    // Enforce payment window (5 minutes after closure)
+    if (time() > $paymentDeadlineTs) {
+        header("Location: ../hiker/HPayment.php?error=payment_window_expired");
+        exit;
+    }
+
+    // Final price per this booking: base price divided by final group size, times this booking's hikers
+    $perPerson = (float)$booking['guiderPrice'] / $finalSize;
+    $finalAmount = $perPerson * (int)$booking['totalHiker'];
+
+    // Persist recalculated amount back to booking to keep consistency across UI and transactions
+    if ($upd = $conn->prepare("UPDATE booking SET price = ? WHERE bookingID = ? AND status = 'pending'")) {
+        $upd->bind_param('di', $finalAmount, $bookingID);
+        $upd->execute();
+        $upd->close();
+        // Reflect in current object
+        $booking['price'] = $finalAmount;
+    }
+}
+
 // Get or create FPX payment method for this user
 $paymentQuery = "SELECT * FROM payment_methods WHERE hikerID = ? AND methodType = 'FPX' LIMIT 1";
 $stmt = $conn->prepare($paymentQuery);
@@ -48,7 +90,7 @@ $stmt->close();
 
 // If no FPX method exists, create one
 if (!$paymentMethod) {
-    $insertQuery = "INSERT INTO payment_methods (hikerID, methodType, cardName, cardNumber, expiryDate, createdAt) VALUES (?, 'FPX', '', '', '', NOW())";
+    $insertQuery = "INSERT INTO payment_methods (hikerID, methodType, createdAt) VALUES (?, 'FPX', NOW())";
     $stmt = $conn->prepare($insertQuery);
     $stmt->bind_param("i", $hikerID);
     $stmt->execute();

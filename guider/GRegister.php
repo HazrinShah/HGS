@@ -28,8 +28,15 @@ if (!is_dir($uploadDir)) {
 $username = $conn->real_escape_string($_POST['username']);
 $email = $conn->real_escape_string($_POST['email']);
 $password = $conn->real_escape_string($_POST['password']);
+$confirmPassword = $conn->real_escape_string($_POST['confirmPassword'] ?? '');
 $gender = $conn->real_escape_string($_POST['gender']);
 $phone = $conn->real_escape_string($_POST['phone_number']);
+
+// Password confirmation check (server-side guard)
+if ($password !== $confirmPassword) {
+    header("Location: GRegister.html?error=password_mismatch");
+    exit();
+}
 
 // Validate email format and existence
 $emailValidation = validateEmailForRegistration($email);
@@ -70,8 +77,9 @@ if ($phoneResult->num_rows > 0) {
 
 // Move uploaded certificate file
 if (move_uploaded_file($_FILES['certificate']['tmp_name'], $targetPath)) {
-    $insertQuery = "INSERT INTO guider (username, email, certificate, password, gender, phone_number)
-                    VALUES ('$username', '$email', '$certificatePath', '$password', '$gender', '$phone')";
+    // Set default status to 'pending' until admin validation
+    $insertQuery = "INSERT INTO guider (username, email, certificate, password, gender, phone_number, status)
+                    VALUES ('$username', '$email', '$certificatePath', '$password', '$gender', '$phone', 'pending')";
 
     if ($conn->query($insertQuery) === TRUE) {
         // Registration successful - redirect to login with success notification

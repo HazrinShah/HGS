@@ -9,7 +9,7 @@ if (!isset($_SESSION['hikerID'])) {
 
 $hikerID = $_SESSION['hikerID'];
 
-// Check for success messages
+// success message
 $success_message = '';
 $info_message = '';
 if (isset($_GET['success'])) {
@@ -31,14 +31,14 @@ if (isset($_GET['info'])) {
     }
 }
 
-// Database connection
+
 include '../shared/db_connection.php';
 
-// Fetch accepted bookings for the current user (excluding completed and those with pending appeals from either hiker or guider)
+// fetch booking dengan appeal yang complete atau pending. appeal la senang cakap
 $bookingQuery = "SELECT b.*, g.username as guiderName, g.price as guiderPrice, g.phone_number as guiderPhone, 
                  g.profile_picture as guiderPicture, g.email as guiderEmail, g.experience as guiderExperience,
                  g.profile_picture as guiderPicture, g.email as guiderEmail,
-                 m.name as mountainName, m.picture as mountainPicture 
+                 m.name as mountainName, m.picture as mountainPicture, m.latitude as mountainLatitude, m.longitude as mountainLongitude 
                  FROM booking b 
                  JOIN guider g ON b.guiderID = g.guiderID 
                  JOIN mountain m ON b.mountainID = m.mountainID 
@@ -55,7 +55,25 @@ $result = $stmt->get_result();
 $acceptedBookings = $result->fetch_all(MYSQLI_ASSOC);
 $stmt->close();
 
-// Fetch appeals related to this hiker's bookings (both hiker and guider appeals)
+// fetch appeal yang baru, 2 minit je visible passtu ilang
+$recentAppeals = [];
+$recentAppealsQuery = "SELECT a.*, b.startDate, b.endDate, g.username as guiderName, m.name as mountainName
+                       FROM appeal a
+                       JOIN booking b ON a.bookingID = b.bookingID
+                       JOIN guider g ON b.guiderID = g.guiderID
+                       JOIN mountain m ON b.mountainID = m.mountainID
+                       WHERE b.hikerID = ?
+                         AND a.status IN ('cancelled','refunded','resolved','rejected')
+                         AND a.updatedAt >= (NOW() - INTERVAL 2 MINUTE)
+                       ORDER BY a.updatedAt DESC";
+$stmt = $conn->prepare($recentAppealsQuery);
+$stmt->bind_param("i", $hikerID);
+$stmt->execute();
+$result = $stmt->get_result();
+$recentAppeals = $result->fetch_all(MYSQLI_ASSOC);
+$stmt->close();
+
+// Fetch appeals related to this hiker booking (both hiker and guider appeals)
 $hikerAppeals = [];
 if ($hikerID) {
     $appealStmt = $conn->prepare("
@@ -123,7 +141,7 @@ $processedAppealQuery = "SELECT a.*, b.startDate, b.endDate, b.price, g.username
                         JOIN booking b ON a.bookingID = b.bookingID 
                         JOIN guider g ON b.guiderID = g.guiderID 
                         JOIN mountain m ON b.mountainID = m.mountainID 
-                        WHERE b.hikerID = ? AND a.status IN ('approved', 'rejected')
+                        WHERE b.hikerID = ? AND a.status IN ('approved', 'rejected', 'refunded', 'resolved')
                         ORDER BY a.updatedAt DESC
                         LIMIT 5";
 $stmt = $conn->prepare($processedAppealQuery);
@@ -133,11 +151,57 @@ $result = $stmt->get_result();
 $processedAppeals = $result->fetch_all(MYSQLI_ASSOC);
 $stmt->close();
 
+// Fetch appeals awaiting hiker choice 
+$awaitingQuery = "SELECT a.appealID, a.bookingID, a.createdAt, b.startDate, b.endDate, m.name as mountainName
+                  FROM appeal a
+                  JOIN booking b ON a.bookingID = b.bookingID
+                  JOIN mountain m ON b.mountainID = m.mountainID
+                  WHERE a.hikerID = ? AND a.status = 'onhold' AND a.appealType = 'cancellation'
+                  ORDER BY a.createdAt DESC";
+$stmt = $conn->prepare($awaitingQuery);
+$stmt->bind_param("i", $hikerID);
+$stmt->execute();
+$result = $stmt->get_result();
+$awaitingAppeals = $result->fetch_all(MYSQLI_ASSOC);
+$stmt->close();
+
 // Handle success messages from URL parameters
 if (isset($_GET['success'])) {
     switch ($_GET['success']) {
         case 'cancellation':
-            $success = "Cancellation request submitted. Admin will review your request.";
+            // Verify pending cancellation
+            if (isset($_GET['bookingID']) && ctype_digit((string)$_GET['bookingID'])) {
+                $bookingIDVerify = (int) $_GET['bookingID'];
+                $verifySql = "SELECT 1 
+                              FROM appeal a 
+                              JOIN booking b ON a.bookingID = b.bookingID 
+                              WHERE b.hikerID = ? AND a.bookingID = ? AND a.appealType = 'cancellation' AND a.status = 'pending' 
+                              LIMIT 1";
+                if ($stmt = $conn->prepare($verifySql)) {
+                    $stmt->bind_param("ii", $hikerID, $bookingIDVerify);
+                    $stmt->execute();
+                    $stmt->store_result();
+                    if ($stmt->num_rows > 0) {
+                        $success = "Cancellation request submitted. Admin will review your request.";
+                    }
+                    $stmt->close();
+                }
+            } else {
+                $verifySql = "SELECT 1 
+                              FROM appeal a 
+                              JOIN booking b ON a.bookingID = b.bookingID 
+                              WHERE b.hikerID = ? AND a.appealType = 'cancellation' AND a.status = 'pending' 
+                              LIMIT 1";
+                if ($stmt = $conn->prepare($verifySql)) {
+                    $stmt->bind_param("i", $hikerID);
+                    $stmt->execute();
+                    $stmt->store_result();
+                    if ($stmt->num_rows > 0) {
+                        $success = "Cancellation request submitted. Admin will review your request.";
+                    }
+                    $stmt->close();
+                }
+            }
             break;
         case 'refund':
             $success = "Refund request submitted successfully! Your booking has been automatically cancelled. Admin will process your refund within 1-3 working days.";
@@ -183,7 +247,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 $appealStmt->bind_param("iis", $bookingID, $hikerID, $fullReason);
                 if ($appealStmt->execute()) {
                     error_log("Cancellation appeal submitted - BookingID: $bookingID, HikerID: $hikerID");
-                    header("Location: HYourGuider.php?success=cancellation");
+                    header("Location: HYourGuider.php?success=cancellation&bookingID=" . $bookingID);
                     exit;
                 } else {
                     $error = "Failed to submit cancellation request: " . $appealStmt->error;
@@ -285,7 +349,7 @@ $conn->close();
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Your Guider – Hiking Guidance System</title>
+  <title>Your Guider - Hiking Guidance System</title>
 
   <!-- Bootstrap & FontAwesome -->
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
@@ -337,7 +401,7 @@ $conn->close();
       margin: 0;
     }
 
-    /* Main Content Container - Matching HBooking style */
+    
     .main-content {
       padding: 2rem 0;
       min-height: 100vh;
@@ -452,7 +516,7 @@ $conn->close();
       padding: 0.25rem 0.5rem;
     }
 
-    /* Book a Trip Button - Matching Payment Page Style */
+
     .btn-book-trip {
       background: linear-gradient(135deg, var(--guider-blue), var(--guider-blue-light));
       border: none;
@@ -1098,6 +1162,23 @@ $conn->close();
       color: white;
     }
 
+    /* mini map styling */
+    .mini-map-guider {
+      width: 200px;
+      height: 130px;
+      border-radius: 12px;
+      overflow: hidden;
+      border: 2px solid var(--guider-blue);
+      box-shadow: 0 8px 20px rgba(30, 64, 175, 0.15);
+      margin-top: 8px;
+    }
+
+    .guider-basic-info {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+    }
+
     @keyframes fadeIn {
       from { opacity: 0; }
       to { opacity: 1; }
@@ -1121,6 +1202,7 @@ $conn->close();
         gap: 1.5rem;
         padding: 1.5rem;
       }
+      .mini-map-guider { width: 100%; height: 160px; }
       
       .booking-header {
         padding: 1.5rem;
@@ -1207,10 +1289,54 @@ $conn->close();
       </div>
     </nav>
   </header>
+<?php include_once '../shared/suspension_banner.php'; ?>
 
   <!-- Main Content -->
   <main class="main-content">
     <div class="container">
+      <?php if (!empty($recentAppeals)): ?>
+        <div class="mb-4">
+          <h5 class="section-title"><i class="bi bi-bell me-2"></i>Recent Appeal Results</h5>
+          <div class="row">
+            <?php foreach ($recentAppeals as $appeal): ?>
+              <div class="col-12 mb-3">
+                <div class="appeal-card processed-appeal">
+                  <div class="appeal-header">
+                    <div class="d-flex flex-column">
+                      <span class="appeal-type <?= 'appeal-type-' . htmlspecialchars($appeal['appealType']) ?>">
+                        <i class="bi bi-flag me-2"></i><?= ucfirst(htmlspecialchars($appeal['appealType'])) ?>
+                      </span>
+                      <small class="appeal-date">Updated: <?= date('d M Y, h:i A', strtotime($appeal['updatedAt'])) ?></small>
+                    </div>
+                    <?php
+                      $badgeClass = 'appeal-status';
+                      $statusText = ucfirst(str_replace('_',' ', $appeal['status']));
+                      $statusStyle = 'secondary';
+                      if ($appeal['status'] === 'refunded') $statusStyle = 'warning';
+                      if ($appeal['status'] === 'resolved') $statusStyle = 'secondary';
+                      if ($appeal['status'] === 'rejected') $statusStyle = 'danger';
+                      if ($appeal['status'] === 'cancelled') $statusStyle = 'danger';
+                    ?>
+                    <span class="badge bg-<?= $statusStyle ?>"><?= htmlspecialchars($statusText) ?></span>
+                  </div>
+                  <div class="appeal-content">
+                    <h6><?= htmlspecialchars($appeal['mountainName']) ?></h6>
+                    <p class="appeal-guider">Guider: <?= htmlspecialchars($appeal['guiderName']) ?></p>
+                    <p class="appeal-dates"><?= date('d/m/Y', strtotime($appeal['startDate'])) ?> - <?= date('d/m/Y', strtotime($appeal['endDate'])) ?></p>
+                    <div class="refund-notice" style="<?= $appeal['status'] === 'refunded' ? '' : 'display:none;' ?>">
+                      <i class="bi bi-currency-dollar me-1"></i>
+                      Refund will be processed within 3 working days.
+                    </div>
+                    <?php if (!empty($appeal['reason'])): ?>
+                      <div class="admin-response"><strong>Reason</strong><p><?= nl2br(htmlspecialchars($appeal['reason'])) ?></p></div>
+                    <?php endif; ?>
+                  </div>
+                </div>
+              </div>
+            <?php endforeach; ?>
+          </div>
+        </div>
+      <?php endif; ?>
       <!-- Page Header -->
       <div class="page-header">
         <h1 class="page-title">
@@ -1218,6 +1344,25 @@ $conn->close();
         </h1>
         <p class="page-subtitle">Manage your accepted hiking bookings and guider interactions</p>
       </div>
+
+      <?php if (!empty($awaitingAppeals)): ?>
+        <div class="alert alert-info d-flex align-items-start gap-3" role="alert">
+          <div>
+            <div class="fw-bold mb-1"><i class="bi bi-chat-dots me-2"></i>Appeal awaiting your choice</div>
+            <div>You have <?= count($awaitingAppeals) ?> appeal(s) waiting for you to choose: Refund or Change Guider.</div>
+            <ul class="mt-2 mb-2">
+              <?php foreach (array_slice($awaitingAppeals, 0, 2) as $ap): ?>
+                <li>
+                  Appeal #<?= (int)$ap['appealID'] ?> • <?= htmlspecialchars($ap['mountainName']) ?> • <?= date('d/m/Y', strtotime($ap['createdAt'])) ?>
+                </li>
+              <?php endforeach; ?>
+            </ul>
+            <a href="HAppealChoice.php" class="btn btn-primary">
+              <i class="bi bi-check-circle me-1"></i>Make Your Choice
+            </a>
+          </div>
+        </div>
+      <?php endif; ?>
 
       <!-- Success Message -->
       <?php if (!empty($success_message)): ?>
@@ -1375,7 +1520,7 @@ $conn->close();
                       <?php echo date('M j, Y', strtotime($appeal['endDate'])); ?>
                     </p>
                     <p class="appeal-price">
-                      <strong>Price: RM <?php echo number_format($appeal['totalPrice'], 2); ?></strong>
+                      <strong>Price: RM <?php echo number_format($appeal['price'], 2); ?></strong>
                     </p>
                     <?php if (!empty($appeal['adminResponse'])): ?>
                       <div class="admin-response">
@@ -1383,7 +1528,23 @@ $conn->close();
                         <p><?php echo htmlspecialchars($appeal['adminResponse']); ?></p>
                       </div>
                     <?php endif; ?>
+                    <?php if ($appeal['status'] === 'refunded'): ?>
+                      <div class="refund-notice">
+                        <i class="fas fa-info-circle me-1"></i>
+                        Payment will be processed and inserted within 3 working days.
+                      </div>
+                    <?php endif; ?>
                     <small class="appeal-date">Processed: <?php echo date('M j, Y g:i A', strtotime($appeal['updatedAt'])); ?></small>
+                    <?php if ($appeal['status'] === 'approved' && $appeal['appealType'] === 'cancellation'): ?>
+                      <div class="d-flex gap-2 mt-2">
+                        <button class="btn btn-sm btn-primary" onclick="chooseAppealAction(<?php echo (int)$appeal['appealID']; ?>, <?php echo (int)$appeal['bookingID']; ?>, 'refund')">
+                          <i class="fas fa-money-bill-wave me-1"></i>Refund
+                        </button>
+                        <button class="btn btn-sm btn-purple" onclick="chooseAppealAction(<?php echo (int)$appeal['appealID']; ?>, <?php echo (int)$appeal['bookingID']; ?>, 'change')">
+                          <i class="fas fa-exchange-alt me-1"></i>Change Guider
+                        </button>
+                      </div>
+                    <?php endif; ?>
                   </div>
                 </div>
               </div>
@@ -1440,6 +1601,7 @@ $conn->close();
               }
               ?>
               
+              <!-- dalam ni ade gmap punya setting  -->
               <div class="booking-card">
                 <div class="booking-header">
                   <div class="guider-info-header">
@@ -1451,6 +1613,14 @@ $conn->close();
                       <p class="mountain-name">
                         <i class="fas fa-mountain"></i><?php echo htmlspecialchars($booking['mountainName']); ?>
                       </p>
+                      <?php 
+                        $lat = isset($booking['mountainLatitude']) ? (float)$booking['mountainLatitude'] : null;
+                        $lng = isset($booking['mountainLongitude']) ? (float)$booking['mountainLongitude'] : null;
+                      ?>
+                      <div class="map-placeholder mini-map-guider"
+                          data-latitude="<?php echo htmlspecialchars($lat ?? ''); ?>"
+                          data-longitude="<?php echo htmlspecialchars($lng ?? ''); ?>">
+                      </div>
                     </div>
                   </div>
                   <span class="booking-status <?php echo $statusClass; ?>">
@@ -2054,5 +2224,68 @@ $conn->close();
       }
     }
   </script>
+  <script>
+    function chooseAppealAction(appealId, bookingId, action) {
+      if (!['refund', 'change'].includes(action)) return;
+      const confirmText = action === 'refund' ?
+        'Are you sure you want to choose Refund?' :
+        'Are you sure you want to choose Change Guider?';
+      if (!confirm(confirmText)) return;
+
+      fetch('../admin/process_appeal.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: action === 'refund' ? 'hiker_chose_refund' : 'hiker_chose_change',
+          appealId: appealId,
+          bookingId: bookingId
+        })
+      })
+      .then(r => r.json())
+      .then(data => {
+        if (data && data.success) {
+          // Reload to reflect new state (admin will then process refund or change)
+          window.location.reload();
+        } else {
+          alert((data && data.message) || 'Failed to submit your choice.');
+        }
+      })
+      .catch(() => alert('Network error while submitting your choice.'));
+    }
+  </script>
+
+  <script>
+    function renderRowMaps(){
+      if(!(window.google && google.maps)) return;
+      document.querySelectorAll('.map-placeholder').forEach(function(el){
+        const lat = parseFloat(el.getAttribute('data-latitude'));
+        const lng = parseFloat(el.getAttribute('data-longitude'));
+        if (isNaN(lat) || isNaN(lng)) {
+          el.textContent = 'No coordinates';
+          el.style.display = 'flex';
+          el.style.alignItems = 'center';
+          el.style.justifyContent = 'center';
+          return;
+        }
+        const m = new google.maps.Map(el, {
+          center: { lat, lng },
+          zoom: 10,
+          disableDefaultUI: true,
+          gestureHandling: 'none'
+        });
+        new google.maps.Marker({ position: { lat, lng }, map: m });
+        el.style.cursor = 'pointer';
+        el.title = 'Open in Google Maps';
+        el.addEventListener('click', function(){
+          window.open(`https://www.google.com/maps?q=${lat},${lng}`, '_blank', 'noopener');
+        });
+      });
+    }
+    window.initMap = function(){ try { renderRowMaps(); } catch(e) { console.error(e); } };
+  </script>
+  <script async src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBQBKen6oHNUxX1Mg6lL5rZMVy_LReklqY&loading=async&callback=initMap"></script>
+
 </body>
 </html>
+
+

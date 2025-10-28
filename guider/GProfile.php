@@ -142,7 +142,7 @@ $conn->close();
 
 
   <style>
-    /* Guider Blue Color Scheme - Matching Hiker Pages */
+      
     :root {
       --guider-blue: #1e40af;
       --guider-blue-light: #3b82f6;
@@ -907,6 +907,7 @@ $conn->close();
       </div>
     </nav>
   </header>
+<?php include_once '../shared/suspension_banner.php'; ?>
   <!-- End Header -->
 
   <?php if (isset($_GET['updated'])): ?>
@@ -940,6 +941,16 @@ $conn->close();
               style="width: 100%; height: 100%; object-fit: cover;" 
               alt="Profile Picture">
         </div>
+
+      <?php if (isset($guider['status']) && strtolower($guider['status']) === 'pending'): ?>
+        <div class="alert alert-warning d-flex align-items-start gap-2" role="alert" style="border-left:4px solid #f59e0b;">
+          <i class="bi bi-hourglass-split" style="color:#b45309;"></i>
+          <div>
+            <strong>Account Under Review</strong><br>
+            Your account is under review by admin and will not appear to hikers until it is approved.
+          </div>
+        </div>
+      <?php endif; ?>
 
       <!-- Price Setting -->
       <div class="profile-section">

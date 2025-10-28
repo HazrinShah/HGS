@@ -1,6 +1,31 @@
 <?php
-include '../shared/db_connection.php';
 session_start();
+$ua = $_SERVER['HTTP_USER_AGENT'] ?? '';
+$ip = $_SERVER['REMOTE_ADDR'] ?? '';
+$fp = hash('sha256', $ua . '|' . $ip);
+if (!isset($_SESSION['fp'])) {
+    $_SESSION['fp'] = $fp;
+    if (isset($_SESSION['hikerID'])) { $_SESSION['hikerLock'] = (int)$_SESSION['hikerID']; }
+} else {
+    if ($_SESSION['fp'] !== $fp || (isset($_SESSION['hikerLock']) && (int)($_SESSION['hikerID'] ?? 0) !== (int)$_SESSION['hikerLock'])) {
+        $_SESSION = [];
+        session_destroy();
+        echo "Session validation failed. Please log in again.";
+        exit;
+    }
+}
+include '../shared/db_connection.php';
+
+// Session debug: log entry with current user and URL
+try {
+    $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+    $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+    $uri = $_SERVER['REQUEST_URI'] ?? '';
+    $fullUrl = $scheme . '://' . $host . $uri;
+    error_log("HBooking1.php ENTRY: hikerID=" . ($_SESSION['hikerID'] ?? 'N/A') . " URL=" . $fullUrl);
+} catch (Throwable $e) {
+    // ignore
+}
 
 if (!isset($_SESSION['hikerID'])) {
     // Debug: Log session information
@@ -43,7 +68,7 @@ if ($preSelectedMountainID && $startDate && $endDate) {
             AND b.groupType = 'open' 
             AND b.startDate <= ? 
             AND b.endDate >= ? 
-            AND b.status IN ('accepted', 'paid')
+            AND b.status IN ('pending', 'accepted', 'paid')
         WHERE m.mountainID = ?
         GROUP BY m.mountainID, m.name, m.location, m.picture
     ");
@@ -58,14 +83,38 @@ if ($preSelectedMountainID && $startDate && $endDate) {
 }
 
 if (isset($_POST['book'])) {
+    // Persist open-group intent across POST (not only via GET)
+    if ((isset($_POST['groupType']) && $_POST['groupType'] === 'open')) {
+        $isOpenGroupBooking = true;
+        if (!empty($_POST['mountainID'])) {
+            $preSelectedMountainID = $_POST['mountainID'];
+        }
+    }
+    // If POST came from an open-group join flow where groupType may be missing,
+    // infer 'open' when there is an existing open group for the same guider/mountain/date
+    $postMountainId = $_POST['mountainID'] ?? null;
+    $postGroupType = $_POST['groupType'] ?? null;
+    if (!$isOpenGroupBooking && $postMountainId && (!isset($_POST['groupType']) || $_POST['groupType'] !== 'close')) {
+        $probe = $conn->prepare("SELECT 1 FROM booking WHERE guiderID = ? AND mountainID = ? AND groupType = 'open' AND startDate <= ? AND endDate >= ? AND status IN ('pending','accepted','paid') LIMIT 1");
+        $probe->bind_param('iiss', $guiderID, $postMountainId, $endDate, $startDate);
+        $probe->execute();
+        $probeRes = $probe->get_result()->fetch_assoc();
+        $probe->close();
+        if ($probeRes) {
+            $isOpenGroupBooking = true;
+            $preSelectedMountainID = $postMountainId;
+            error_log("HBooking1.php - Inferred open-group intent from POST for mountainID={$postMountainId}");
+        }
+    }
     // Debug: Log all POST data
     error_log("HBooking1.php - POST data: " . print_r($_POST, true));
     error_log("HBooking1.php - GET data: " . print_r($_GET, true));
     
-    // For open group bookings, use the pre-selected mountain
-    $mountainID = $isOpenGroupBooking ? $preSelectedMountainID : ($_POST['mountainID'] ?? null);
+    // For open group bookings, use the pre-selected mountain (fallback to POST)
+    $mountainID = $isOpenGroupBooking ? ($preSelectedMountainID ?: ($_POST['mountainID'] ?? null)) : ($_POST['mountainID'] ?? null);
     $totalHiker = $_POST['totalHiker'] ?? null;
-    $groupType = $isOpenGroupBooking ? 'open' : ($_POST['groupType'] ?? 'close'); // Force open for open group bookings
+    // If user selected open or inferred open, force 'open' and never fall back to 'close'
+    $groupType = $isOpenGroupBooking ? 'open' : ($_POST['groupType'] ?? 'close');
     $startDate = $_POST['startDate'] ?? date('Y-m-d');
     $endDate = $_POST['endDate'] ?? date('Y-m-d');
     $status = "pending";
@@ -105,9 +154,167 @@ if (isset($_POST['book'])) {
         exit();
     }
     
+    if ($groupType === 'open') {
+        // If an open group already exists for these dates with this guider, force join that group (no new parallel group)
+        // IMPORTANT: restrict to the same mountain to avoid cross-mountain joins
+        $existingOpen = $conn->prepare("
+            SELECT bookingID, mountainID AS openMountainID, startDate AS openStart, endDate AS openEnd, created_at AS groupStart
+            FROM booking
+            WHERE guiderID = ?
+              AND mountainID = ?
+              AND groupType = 'open'
+              AND startDate <= ?
+              AND endDate >= ?
+              AND status IN ('pending','accepted','paid')
+            ORDER BY created_at ASC
+            LIMIT 1
+        ");
+        $existingOpen->bind_param('iiss', $guiderID, $mountainID, $endDate, $startDate);
+        $existingOpen->execute();
+        $openRow = $existingOpen->get_result()->fetch_assoc();
+        $existingOpen->close();
+
+        if ($openRow) {
+            // Check forming window and capacity
+            $groupStartTs = $openRow['groupStart'] ? strtotime($openRow['groupStart']) : time();
+            $recruitDeadline = $groupStartTs + (3 * 60);
+            $capStmt = $conn->prepare("
+                SELECT COALESCE(b.totalHiker,0) AS totalHikers
+                FROM booking b
+                WHERE b.bookingID = ?
+            ");
+            $capStmt->bind_param('i', $openRow['bookingID']);
+            $capStmt->execute();
+            $cap = $capStmt->get_result()->fetch_assoc();
+            $capStmt->close();
+
+            $currentSize = (int)($cap['totalHikers'] ?? 0);
+            $formingOpen = (time() < $recruitDeadline) && ($currentSize < 7);
+
+            if ($formingOpen) {
+                // Join into existing open booking via bookingParticipant, update booking.totalHiker
+                // Ensure participants table exists
+                $conn->query("CREATE TABLE IF NOT EXISTS bookingParticipant (
+                    bookingID INT NOT NULL,
+                    hikerID INT NOT NULL,
+                    qty INT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (bookingID, hikerID)
+                ) ENGINE=InnoDB");
+
+                $joinQty = (int)$totalHiker;
+                $bookingIDAnchor = (int)$openRow['bookingID'];
+
+                // Capacity check against anchor booking's totalHiker
+                if (($currentSize + $joinQty) > 7) {
+                    $seatsLeft = max(0, 7 - $currentSize);
+                    echo "<div style='background:#fee;border:1px solid #fcc;padding:20px;margin:20px;border-radius:5px;'>";
+                    echo "<h3 style='color:#c33;'>Open Group Capacity Reached</h3>";
+                    echo "<p>Only {$seatsLeft} seat(s) left for this open group on the selected dates. Please adjust the number of hikers or choose another date.</p>";
+                    echo "<a href='javascript:history.back()' style='background:#007bff;color:white;padding:10px 20px;text-decoration:none;border-radius:5px;'>Go Back</a>";
+                    echo "</div>";
+                    exit();
+                }
+
+                // Upsert participant row
+                $upsert = $conn->prepare("INSERT INTO bookingParticipant (bookingID, hikerID, qty)
+                                          VALUES (?, ?, ?)
+                                          ON DUPLICATE KEY UPDATE qty = qty + VALUES(qty)");
+                $upsert->bind_param('iii', $bookingIDAnchor, $hikerID, $joinQty);
+                $upsert->execute();
+                $upsert->close();
+
+                // Update booking totalHiker atomically
+                $updTot = $conn->prepare("UPDATE booking SET totalHiker = totalHiker + ? WHERE bookingID = ?");
+                $updTot->bind_param('ii', $joinQty, $bookingIDAnchor);
+                $updTot->execute();
+                $updTot->close();
+
+                // Redirect straight to payment; do not create a new booking
+                error_log("HBooking1.php - Joined existing open bookingID={$bookingIDAnchor} by hikerID={$hikerID} qty={$joinQty}");
+                header("Location: HPayment.php");
+                exit();
+            } else {
+                echo "<div style='background:#fee;border:1px solid #fcc;padding:20px;margin:20px;border-radius:5px;'>";
+                echo "<h3 style='color:#c33;'>Open Group Unavailable</h3>";
+                echo "<p>There is an existing open group for the selected guider and dates, but it is either closed or full. Please choose another date.</p>";
+                echo "<a href='javascript:history.back()' style='background:#007bff;color:white;padding:10px 20px;text-decoration:none;border-radius:5px;'>Go Back</a>";
+                echo "</div>";
+                exit();
+            }
+        }
+    }
+
+    if ($groupType === 'close') {
+        // Close group: flat price for the whole group regardless of size
+        $totalPrice = $price;
+    } else {
+        // Open group: enforce 24h window or max 7, and dynamic per-person pricing
+        // Count existing participants including pending (to reserve seats), accepted, and paid
+        $existingStmt = $conn->prepare("
+            SELECT
+              COALESCE(SUM(b.totalHiker), 0) as existingHikers,
+              MIN(b.created_at) as groupStart
+            FROM booking b
+            WHERE b.mountainID = ?
+              AND b.guiderID = ?
+              AND b.groupType = 'open'
+              AND b.startDate <= ?
+              AND b.endDate >= ?
+              AND b.status IN ('pending', 'accepted', 'paid')
+        ");
+        $existingStmt->bind_param("iiss", $mountainID, $guiderID, $endDate, $startDate);
+        $existingStmt->execute();
+        $existingRes = $existingStmt->get_result()->fetch_assoc();
+        $existingHikers = (int)($existingRes['existingHikers'] ?? 0);
+        $groupStart = $existingRes['groupStart'] ? strtotime($existingRes['groupStart']) : time();
+
+        // Determine if the group is already closed (either reached 7 or exceeded 3 minutes since first booking)
+        $nowTs = time();
+        $deadlineTs = $groupStart + (3 * 60); // 3 minutes to form group
+        $isClosed = ($existingHikers >= 7) || ($nowTs >= $deadlineTs);
+
+        if ($isClosed) {
+            echo "<div style='background: #fee; border: 1px solid #fcc; padding: 20px; margin: 20px; border-radius: 5px;'>";
+            echo "<h3 style='color: #c33;'>Open Group Closed</h3>";
+            echo "<p>This open group is closed (either 3 minutes passed or full with 7 hikers). Please choose Close Group or different dates.</p>";
+            echo "<a href='javascript:history.back()' style='background: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;'>Go Back</a>";
+            echo "</div>";
+            exit();
+        }
+
+        $groupSizeAfter = $existingHikers + (int)$totalHiker;
+        if ($groupSizeAfter > 7) {
+            // Prevent overbooking in open group
+            $seatsLeft = max(0, 7 - $existingHikers);
+            echo "<div style='background: #fee; border: 1px solid #fcc; padding: 20px; margin: 20px; border-radius: 5px;'>";
+            echo "<h3 style='color: #c33;'>Open Group Capacity Reached</h3>";
+            echo "<p>Only {$seatsLeft} seat(s) left for this open group on the selected dates. Please adjust the number of hikers or choose Close Group.</p>";
+            echo "<a href='javascript:history.back()' style='background: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;'>Go Back</a>";
+            echo "</div>";
+            exit();
+        }
+
+        // Provisional total for summary; final amount will be determined at payment after the group closes
+        $perPersonPrice = $price / max($groupSizeAfter, 1);
+        $totalPrice = $perPersonPrice * (int)$totalHiker;
+    }
+
     $location = $mountainResult['name'] . ", " . $mountainResult['location'];
 
-    $totalPrice = $price * $totalHiker;
+    // Prevent duplicate pending open-group bookings for same hiker/guider/date
+    if ($groupType === 'open') {
+        $dup = $conn->prepare("SELECT bookingID FROM booking WHERE hikerID = ? AND guiderID = ? AND mountainID = ? AND groupType = 'open' AND startDate <= ? AND endDate >= ? AND status = 'pending' LIMIT 1");
+        $dup->bind_param("iiiss", $hikerID, $guiderID, $mountainID, $endDate, $startDate);
+        $dup->execute();
+        $dupRes = $dup->get_result()->fetch_assoc();
+        $dup->close();
+        if ($dupRes) {
+            error_log("HBooking1.php - Duplicate pending open booking exists. Redirecting to HPayment. hikerID=$hikerID guiderID=$guiderID mountainID=$mountainID");
+            header("Location: HPayment.php");
+            exit();
+        }
+    }
 
     $insert = $conn->prepare("INSERT INTO booking (startDate, endDate, totalHiker, groupType, location, price, status, hikerID, guiderID, mountainID)
                               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
@@ -116,9 +323,23 @@ if (isset($_POST['book'])) {
     if ($insert->execute()) {
         $bookingID = $conn->insert_id;
         
-        // Debug: Log successful booking creation
         error_log("HBooking1.php - Booking created successfully. BookingID: $bookingID, HikerID: $hikerID, GuiderID: $guiderID, MountainID: $mountainID, Status: pending");
         
+        // For new open-group booking, also create participant row for the creator
+        if ($groupType === 'open') {
+            $conn->query("CREATE TABLE IF NOT EXISTS bookingParticipant (
+                bookingID INT NOT NULL,
+                hikerID INT NOT NULL,
+                qty INT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (bookingID, hikerID)
+            ) ENGINE=InnoDB");
+            $insP = $conn->prepare("INSERT INTO bookingParticipant (bookingID, hikerID, qty) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE qty = VALUES(qty)");
+            $insP->bind_param('iii', $bookingID, $hikerID, $totalHiker);
+            $insP->execute();
+            $insP->close();
+        }
+
         $_SESSION['booking_success'] = true;
         $_SESSION['booking_summary'] = [
             'startDate' => $startDate,
@@ -128,10 +349,11 @@ if (isset($_POST['book'])) {
             'groupType' => $groupType,
             'totalPrice' => $totalPrice
         ];
+        // Log before redirect to help detect session flips
+        error_log("HBooking1.php REDIRECT: hikerID=" . ($_SESSION['hikerID'] ?? 'N/A') . " to HBooking1.php?guiderID=".$guiderID."&success=1");
         header("Location: HBooking1.php?guiderID=".$guiderID."&success=1");
         exit();
     } else {
-        // Debug: Log the error
         error_log("HBooking1.php - Booking insertion failed: " . $insert->error);
         echo "Booking failed: " . $insert->error;
         exit();
@@ -1189,6 +1411,7 @@ $mountainResult = $conn->query($mountainQuery);
     </div>
   </nav>
 </header>
+<?php include_once '../shared/suspension_banner.php'; ?>
 
 <!-- Main Content -->
 <main class="main-content">
@@ -1353,7 +1576,22 @@ $mountainResult = $conn->query($mountainQuery);
           </div>
           
           <div class="selected-mountain-card">
-            <img src="<?= !empty($openGroupMountain['picture']) ? (strpos($openGroupMountain['picture'], 'http') === 0 ? $openGroupMountain['picture'] : '../' . $openGroupMountain['picture']) : 'https://via.placeholder.com/100' ?>" class="mountain-img" alt="Mountain Image">
+            <?php 
+              $rawPic = $openGroupMountain['picture'] ?? '';
+              $rawPic = str_replace('\\', '/', $rawPic);
+              if ($rawPic === '' || $rawPic === null) {
+                $selPicture = 'https://via.placeholder.com/100';
+              } elseif (strpos($rawPic, 'http') === 0) {
+                $selPicture = $rawPic;
+              } elseif (strpos($rawPic, '../') === 0) {
+                $selPicture = $rawPic;
+              } elseif (strpos($rawPic, '/') === 0) {
+                $selPicture = '..' . $rawPic;
+              } else {
+                $selPicture = '../' . $rawPic;
+              }
+            ?>
+            <img src="<?= htmlspecialchars($selPicture) ?>" class="mountain-img" alt="Mountain Image">
             <div class="mountain-info">
               <h6><?= htmlspecialchars($openGroupMountain['name']) ?></h6>
               <small><?= htmlspecialchars($openGroupMountain['location']) ?></small>
@@ -1378,11 +1616,23 @@ $mountainResult = $conn->query($mountainQuery);
               $mountainID = $row['mountainID'];
               $name = htmlspecialchars($row['name']);
               $location = htmlspecialchars($row['location']);
-              $picture = !empty($row['picture']) ? (strpos($row['picture'], 'http') === 0 ? $row['picture'] : '../' . $row['picture']) : 'https://via.placeholder.com/100';
+              $raw = $row['picture'] ?? '';
+              $raw = str_replace('\\', '/', $raw);
+              if ($raw === '' || $raw === null) {
+                $picture = 'https://via.placeholder.com/100';
+              } elseif (strpos($raw, 'http') === 0) {
+                $picture = $raw;
+              } elseif (strpos($raw, '../') === 0) {
+                $picture = $raw;
+              } elseif (strpos($raw, '/') === 0) {
+                $picture = '..' . $raw;
+              } else {
+                $picture = '../' . $raw;
+              }
             ?>
             <label class="col-12 mountain-card">
               <input type="radio" name="mountainID" value="<?= $mountainID ?>" required>
-              <img src="<?= $picture ?>" class="mountain-img" alt="Mountain Image">
+              <img src="<?= htmlspecialchars($picture) ?>" class="mountain-img" alt="Mountain Image">
               <div class="mountain-info">
                 <h6><?= $name ?></h6>
                 <small><?= $location ?></small>
@@ -1396,12 +1646,13 @@ $mountainResult = $conn->query($mountainQuery);
     <!-- Total Hiker Input -->
     <div class="mt-4">
           <label for="totalHiker" class="form-label">
-            <i class="fas fa-users me-2"></i>Total Hikers (1–7)
+            <i class="fas fa-users me-2"></i>Total Hikers (7 maximum)
             <?php if ($isOpenGroupBooking): ?>
-            <small class="text-muted d-block">Existing group has <?= $openGroupMountain['existingHikers'] ?> hikers</small>
+            <?php $seatsLeft = max(0, 7 - (int)($openGroupMountain['existingHikers'] ?? 0)); ?>
+            <small class="text-muted d-block">Existing group has <?= (int)($openGroupMountain['existingHikers'] ?? 0) ?> hikers • Seats left: <?= $seatsLeft ?></small>
             <?php endif; ?>
           </label>
-          <input type="number" name="totalHiker" min="1" max="7" required class="form-control" style="max-width: 200px;" id="totalHikerInput">
+          <input type="number" name="totalHiker" min="1" <?php if ($isOpenGroupBooking): ?>max="<?= $seatsLeft ?>"<?php else: ?>max="7"<?php endif; ?> required class="form-control" style="max-width: 200px;" id="totalHikerInput" <?php if ($isOpenGroupBooking && $seatsLeft === 0): ?>disabled<?php endif; ?>>
           <?php if ($isOpenGroupBooking): ?>
           <div id="hikerValidation" class="text-danger mt-2" style="display: none;">
             <i class="fas fa-exclamation-triangle me-1"></i>
@@ -1418,22 +1669,26 @@ $mountainResult = $conn->query($mountainQuery);
         </label>
         <div class="group-type-container">
             <div class="group-type-option">
-                <input type="radio" name="groupType" value="close" id="closeGroup" checked>
+                <input type="radio" name="groupType" value="close" id="closeGroup" <?php echo ($isOpenGroupBooking || ($_GET['joinOpen'] ?? '') === '1') ? 'disabled' : 'checked'; ?>>
                 <label for="closeGroup" class="group-type-label">
                     <div class="group-type-card">
                         <i class="fas fa-lock"></i>
-                        <h6>Close Group</h6>
-                        <p>Private group - Guider will be unavailable for other bookings on this date</p>
+                        <div>
+                            <h6>Close Group</h6>
+                            <p>Flat price for your group</p>
+                        </div>
                     </div>
                 </label>
             </div>
             <div class="group-type-option">
-                <input type="radio" name="groupType" value="open" id="openGroup">
+                <input type="radio" name="groupType" value="open" id="openGroup" <?php echo ($isOpenGroupBooking || ($_GET['joinOpen'] ?? '') === '1') ? 'checked' : ''; ?>>
                 <label for="openGroup" class="group-type-label">
                     <div class="group-type-card">
                         <i class="fas fa-unlock"></i>
-                        <h6>Open Group</h6>
-                        <p>Public group - Others can join your trip, guider remains available</p>
+                        <div>
+                            <h6>Open Group</h6>
+                            <p>Split price by final headcount</p>
+                        </div>
                     </div>
                 </label>
             </div>

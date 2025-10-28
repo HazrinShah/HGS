@@ -13,8 +13,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
     if ($res->num_rows === 1) {
         $admin = $res->fetch_assoc();
-
-        // Plain text password comparison (replace with password_verify if hashed)
+        
         if ($password === $admin['password']) {
             $_SESSION['email'] = $admin['email'];
 

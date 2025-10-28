@@ -1,4 +1,4 @@
-<?php
+﻿<?php
 session_start();
 if (!isset($_SESSION['guiderID'])) {
     header("Location: GLogin.html");
@@ -64,13 +64,13 @@ if ($guiderID) {
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Performance Review – Hiking Guidance System</title>
+  <title>Performance Review - Hiking Guidance System</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
   <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
   <style>
-    /* Guider Blue Color Scheme - Matching GBooking */
+    
     :root {
       --guider-blue: #1e40af;
       --guider-blue-light: #3b82f6;
@@ -96,7 +96,7 @@ if ($guiderID) {
       min-height: 100vh;
     }
 
-    /* Header - Matching GBooking */
+    
     .navbar {
       background: linear-gradient(135deg, var(--guider-blue-dark), var(--guider-blue)) !important;
       padding: 12px 0;
@@ -127,7 +127,7 @@ if ($guiderID) {
       object-fit: contain;
     }
 
-    /* Offcanvas Menu - Matching GBooking */
+    
     .offcanvas {
       background-color: var(--light-color);
     }
@@ -152,7 +152,7 @@ if ($guiderID) {
       border-color: var(--guider-blue);
     }
 
-    /* Main Container - Matching GBooking */
+    
     .main-container {
       padding: 1.5rem;
       max-width: 1400px;
@@ -161,7 +161,7 @@ if ($guiderID) {
       min-height: calc(100vh - 80px);
     }
 
-    /* Page Header - Matching GBooking */
+    
     .page-header {
       text-align: center;
       margin-bottom: 3rem;
@@ -431,6 +431,8 @@ if ($guiderID) {
 </header>
 <!-- End Header -->
 
+<?php include_once '../shared/suspension_banner.php'; ?>
+
 <div class="main-container">
   <!-- Page Header -->
   <div class="page-header">
@@ -505,7 +507,7 @@ if ($guiderID) {
             <div class="reviewer-info">
               <div>
                 <div class="reviewer-name"><?= htmlspecialchars($review['hikerName']) ?></div>
-                <div class="review-location"><?= htmlspecialchars($review['mountainName']) ?> • Booking #<?= $review['bookingID'] ?></div>
+                <div class="review-location"><?= htmlspecialchars($review['mountainName']) ?> â€¢ Booking #<?= $review['bookingID'] ?></div>
               </div>
             </div>
             <div class="review-rating">

@@ -221,6 +221,63 @@
           font-size: 2.5rem;
         }
       }
+      /* Custom Notification System (match login ban style) */
+      .notification-container {
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        z-index: 9999;
+        max-width: 400px;
+      }
+
+      .notification {
+        background: white;
+        border-radius: 12px;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+        margin-bottom: 12px;
+        padding: 16px 20px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        border-left: 4px solid;
+        transform: translateX(100%);
+        opacity: 0;
+        transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        position: relative;
+        overflow: hidden;
+      }
+
+      .notification.show { transform: translateX(0); opacity: 1; }
+      .notification.hide { transform: translateX(100%); opacity: 0; }
+
+      .notification.error { border-left-color: #ef4444; background: linear-gradient(135deg, #fef2f2, #fee2e2); }
+      .notification.success { border-left-color: #10b981; background: linear-gradient(135deg, #f0fdf4, #ecfdf5); }
+      .notification.warning { border-left-color: #f59e0b; background: linear-gradient(135deg, #fffbeb, #fef3c7); }
+      .notification.info { border-left-color: #1e40af; background: linear-gradient(135deg, #dbeafe, #e0f2fe); }
+
+      .notification-icon { width: 24px; height: 24px; display:flex; align-items:center; justify-content:center; border-radius:50%; flex-shrink:0; }
+      .notification.error .notification-icon { background:#ef4444; color:#fff; }
+      .notification.success .notification-icon { background:#10b981; color:#fff; }
+      .notification.warning .notification-icon { background:#f59e0b; color:#fff; }
+      .notification.info .notification-icon { background:#1e40af; color:#fff; }
+
+      .notification-content { flex:1; min-width:0; }
+      .notification-title { font-weight:600; font-size:14px; margin:0 0 4px 0; color:#1f2937; }
+      .notification-message { font-size:13px; margin:0; color:#6b7280; line-height:1.4; }
+
+      .notification-close { background:none; border:none; color:#9ca3af; cursor:pointer; padding:4px; border-radius:4px; transition:all .2s ease; flex-shrink:0; }
+      .notification-close:hover { background: rgba(0,0,0,0.1); color:#374151; }
+
+      .notification-progress { position:absolute; bottom:0; left:0; height:3px; background: rgba(0,0,0,0.1); border-radius:0 0 12px 12px; transition: width linear; }
+      .notification.error .notification-progress { background:#ef4444; }
+      .notification.success .notification-progress { background:#10b981; }
+      .notification.warning .notification-progress { background:#f59e0b; }
+      .notification.info .notification-progress { background:#1e40af; }
+
+      @media (max-width: 768px) {
+        .notification-container { bottom:10px; right:10px; left:10px; max-width:none; }
+        .notification { margin-bottom:8px; padding:12px 16px; }
+      }
     </style>
 
     <link
@@ -229,6 +286,8 @@
     />
   </head>
   <body>
+    <!-- Notification Container for alerts injected by JS -->
+    <div class="notification-container" id="notificationContainer" style="position:fixed;right:20px;bottom:20px;z-index:9999;"></div>
     <!-- Registration Section -->
     <div class="register-container">
       <div class="register-card">
@@ -484,20 +543,18 @@
         if (urlParams.get('error') === 'invalid_phone') {
             const message = urlParams.get('message') || 'Invalid phone number';
             notificationSystem.error('Invalid Phone Number!', message);
-            // Clean URL
             window.history.replaceState({}, document.title, window.location.pathname);
         }
-        
+
         if (urlParams.get('error') === 'upload_failed') {
-            const message = urlParams.get('message') || 'File upload failed';
-            notificationSystem.error('Upload Failed!', message);
-            // Clean URL
-            window.history.replaceState({}, document.title, window.location.pathname);
+          const message = urlParams.get('message') || 'File upload failed';
+          notificationSystem.error('Upload Failed!', message);
+          // Clean URL
+          window.history.replaceState({}, document.title, window.location.pathname);
         }
-        
-        if (urlParams.get('error') === 'registration_failed') {
-            const message = urlParams.get('message') || 'Registration failed';
-            notificationSystem.error('Registration Failed!', message);
+
+        if (urlParams.get('error') === 'password_mismatch') {
+            notificationSystem.error('Validation Error!', 'Passwords do not match. Please try again.');
             // Clean URL
             window.history.replaceState({}, document.title, window.location.pathname);
         }

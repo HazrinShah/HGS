@@ -19,7 +19,8 @@ $endDate = $_GET['end'] ?? null;
 $availableGuiderIDs = [];
 
 if ($startDate && $endDate) {
-    $guiderQuery = "SELECT guiderID FROM guider";
+    // Only consider active guiders
+    $guiderQuery = "SELECT guiderID FROM guider WHERE status = 'active'";
     $guiderResult = $conn->query($guiderQuery);
 
     while ($g = $guiderResult->fetch_assoc()) {
@@ -32,26 +33,47 @@ if ($startDate && $endDate) {
         $result = $stmt->get_result();
 
         if ($result->num_rows == 0) {
-            // Check for close group bookings that would make guider unavailable
-            $closeGroupStmt = $conn->prepare("SELECT COUNT(*) as closeCount FROM booking WHERE guiderID = ? AND groupType = 'close' AND startDate <= ? AND endDate >= ? AND status IN ('accepted', 'paid')");
-            $closeGroupStmt->bind_param("iss", $guiderID, $endDate, $startDate);
-            $closeGroupStmt->execute();
-            $closeGroupResult = $closeGroupStmt->get_result()->fetch_assoc();
-            
-            if ($closeGroupResult['closeCount'] == 0) {
-                $availableGuiderIDs[] = $guiderID;
+            // 1) Close group overlap blocks availability entirely
+            $closeStmt = $conn->prepare("SELECT COUNT(*) AS c FROM booking WHERE guiderID = ? AND groupType = 'close' AND startDate <= ? AND endDate >= ? AND status IN ('pending','accepted','paid')");
+            $closeStmt->bind_param("iss", $guiderID, $endDate, $startDate);
+            $closeStmt->execute();
+            $closeCount = ($closeStmt->get_result()->fetch_assoc()['c'] ?? 0);
+            $closeStmt->close();
+
+            if ((int)$closeCount === 0) {
+                // 2) Open group overlap: allow joining only during 3-minute forming window and if not full (7)
+                $openStmt = $conn->prepare("\n                    SELECT COALESCE(SUM(b.totalHiker),0) AS totalHikers, MIN(b.created_at) AS groupStart\n                    FROM booking b\n                    WHERE b.guiderID = ?\n                      AND b.groupType = 'open'\n                      AND b.startDate <= ?\n                      AND b.endDate >= ?\n                      AND b.status IN ('pending','accepted','paid')\n                ");
+                $openStmt->bind_param("iss", $guiderID, $endDate, $startDate);
+                $openStmt->execute();
+                $openRes = $openStmt->get_result()->fetch_assoc();
+                $openStmt->close();
+
+                $totalHikers = (int)($openRes['totalHikers'] ?? 0);
+                $groupStart = isset($openRes['groupStart']) && $openRes['groupStart'] ? strtotime($openRes['groupStart']) : null;
+
+                if ($groupStart) {
+                    $recruitDeadline = $groupStart + (3 * 60);
+                    $formingOpen = (time() < $recruitDeadline) && ($totalHikers < 7);
+                    if ($formingOpen) {
+                        $availableGuiderIDs[] = $guiderID; // can join existing open group
+                    }
+                } else {
+                    // No open-group overlap, guider is available for new bookings
+                    $availableGuiderIDs[] = $guiderID;
+                }
             }
         }
     }
 
     if (!empty($availableGuiderIDs)) {
         $guiderFilter = implode(",", $availableGuiderIDs);
-        $sql = "SELECT guiderID, username, price, profile_picture, skills, experience, about, average_rating, total_reviews FROM guider WHERE guiderID IN ($guiderFilter)";
+        $sql = "SELECT guiderID, username, price, profile_picture, skills, experience, about, average_rating, total_reviews FROM guider WHERE status = 'active' AND guiderID IN ($guiderFilter)";
     } else {
         $sql = null;
     }
 } else {
-    $sql = "SELECT guiderID, username, price, profile_picture, skills, experience, about, average_rating, total_reviews FROM guider";
+    // Default list only active guiders
+    $sql = "SELECT guiderID, username, price, profile_picture, skills, experience, about, average_rating, total_reviews FROM guider WHERE status = 'active'";
 }
 
 $result = ($sql) ? $conn->query($sql) : null;
@@ -71,7 +93,7 @@ function getRemainingQuota($conn, $guiderID, $startDate, $endDate) {
         AND b.groupType = 'open' 
         AND b.startDate <= ? 
         AND b.endDate >= ? 
-        AND b.status IN ('accepted', 'paid')
+        AND b.status IN ('pending','accepted','paid')
         GROUP BY m.mountainID, m.name
         LIMIT 1
     ");
@@ -924,6 +946,7 @@ function getRemainingQuota($conn, $guiderID, $startDate, $endDate) {
 <div class="notification-container" id="notificationContainer"></div>
 
 <!-- Header -->
+<?php $isSuspended = (($_SESSION['hiker_status'] ?? '') === 'suspended'); ?>
 <header>
   <nav class="navbar">
     <div class="container d-flex align-items-center justify-content-between">
@@ -958,6 +981,32 @@ function getRemainingQuota($conn, $guiderID, $startDate, $endDate) {
     </div>
   </nav>
 </header>
+
+<!-- Suspension Banner (for suspended hikers) -->
+<?php if ($isSuspended): ?>
+  <div style="position:sticky;top:0;z-index:1001;">
+    <div style="background:linear-gradient(135deg,#fee2e2,#fecaca);border:1px solid #ef4444;color:#7f1d1d;padding:12px 16px;text-align:center;font-weight:700;">
+      Your account is currently suspended. You cannot make any bookings until it is unsuspended.
+    </div>
+  </div>
+  <script>
+    // Disable booking interactions within main content when suspended
+    document.addEventListener('DOMContentLoaded', function(){
+      var container = document.querySelector('.main-content');
+      if(!container) return;
+      container.querySelectorAll('button, a.btn, input[type="submit"], [data-bs-target="#dateModal"]').forEach(function(el){
+        el.classList.add('disabled');
+        el.setAttribute('aria-disabled','true');
+        if (el.tagName === 'A') {
+          el.addEventListener('click', function(e){ e.preventDefault(); });
+        } else {
+          el.disabled = true;
+        }
+        el.title = 'Booking actions are disabled while your account is suspended';
+      });
+    });
+  </script>
+<?php endif; ?>
 
 <!-- Main Content -->
 <main class="main-content">
@@ -1037,6 +1086,22 @@ function getRemainingQuota($conn, $guiderID, $startDate, $endDate) {
           $quotaData = getRemainingQuota($conn, $guiderID, $startDate, $endDate);
           $quotaDisplay = '';
           $mountainDisplay = '';
+          // Determine if user can join an existing open group (forming window + not full)
+          $canJoinOpen = false;
+          if ($startDate && $endDate) {
+            if ($stmtJoin = $conn->prepare("\n              SELECT COALESCE(SUM(b.totalHiker),0) AS totalHikers, MIN(b.created_at) AS groupStart\n              FROM booking b\n              WHERE b.guiderID = ?\n                AND b.groupType = 'open'\n                AND b.startDate <= ?\n                AND b.endDate >= ?\n                AND b.status IN ('pending','accepted','paid')\n            ")) {
+              $stmtJoin->bind_param('iss', $guiderID, $endDate, $startDate);
+              $stmtJoin->execute();
+              $jr = $stmtJoin->get_result()->fetch_assoc();
+              $stmtJoin->close();
+              $totalHikersJ = (int)($jr['totalHikers'] ?? 0);
+              $groupStartJ = isset($jr['groupStart']) && $jr['groupStart'] ? strtotime($jr['groupStart']) : null;
+              if ($groupStartJ) {
+                $recruitDeadlineJ = $groupStartJ + (3 * 60);
+                $canJoinOpen = (time() < $recruitDeadlineJ) && ($totalHikersJ < 7);
+              }
+            }
+          }
           
           if ($quotaData !== null) {
               $quotaDisplay = '<div class="quota-info">
@@ -1064,9 +1129,9 @@ function getRemainingQuota($conn, $guiderID, $startDate, $endDate) {
                           <input type="hidden" name="guiderID" value="' . $guiderID . '">
                           <input type="hidden" name="start" value="' . $startDate . '">
                           <input type="hidden" name="end" value="' . $endDate . '">' . 
-                          ($quotaData !== null ? '<input type="hidden" name="mountainID" value="' . $quotaData['mountainID'] . '">' : '') . '
+                          ($canJoinOpen && $quotaData !== null ? '<input type="hidden" name="mountainID" value="' . $quotaData['mountainID'] . '"><input type="hidden" name="joinOpen" value="1">' : '') . '
                           <button type="submit" class="btn btn-book w-100">
-                            <i class="fas fa-calendar-check me-2"></i>BOOK
+                            <i class="fas fa-calendar-check me-2"></i>' . (($canJoinOpen && $quotaData !== null) ? 'Join Open Group' : 'BOOK') . '
                           </button>
                         </form>
 
@@ -1127,8 +1192,9 @@ function getRemainingQuota($conn, $guiderID, $startDate, $endDate) {
                               <input type="hidden" name="guiderID" value="' . $guiderID . '">
                               <input type="hidden" name="start" value="' . $startDate . '">
                               <input type="hidden" name="end" value="' . $endDate . '">
+                              ' . (($canJoinOpen && $quotaData !== null) ? '<input type="hidden" name="mountainID" value="' . $quotaData['mountainID'] . '"><input type="hidden" name="joinOpen" value="1">' : '') . '
                               <button type="submit" class="btn btn-book w-100">
-                                <i class="fas fa-calendar-check me-2"></i>Book This Guide
+                                <i class="fas fa-calendar-check me-2"></i>' . (($canJoinOpen && $quotaData !== null) ? 'Join Open Group' : 'Book This Guide') . '
                               </button>
                             </form>
                         </div>

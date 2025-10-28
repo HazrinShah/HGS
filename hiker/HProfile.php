@@ -1,4 +1,4 @@
-<?php
+﻿<?php
 include '../shared/db_connection.php';
 session_start();
 
@@ -72,7 +72,7 @@ if ($result->num_rows === 1) {
 
 // Fetch payment methods for the current hiker
 $paymentMethods = [];
-$paymentQuery = "SELECT paymentID, methodType, cardName, cardNumber, expiryDate FROM payment_methods WHERE hikerID = ? ORDER BY paymentID DESC";
+$paymentQuery = "SELECT paymentID, methodType FROM payment_methods WHERE hikerID = ? ORDER BY paymentID DESC";
 $paymentStmt = $conn->prepare($paymentQuery);
 $paymentStmt->bind_param("i", $hikerID);
 $paymentStmt->execute();
@@ -607,6 +607,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_picture'])) {
     </div>
   </nav>
 </header>
+<?php include_once '../shared/suspension_banner.php'; ?>
 
 <!-- Main Content -->
 <main>

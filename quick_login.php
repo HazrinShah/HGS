@@ -1,6 +1,15 @@
 <?php
 session_start();
 
+// Restrict quick login to localhost and DEV mode only
+$isLocal = in_array($_SERVER['REMOTE_ADDR'] ?? '', ['127.0.0.1', '::1']);
+$devMode = getenv('DEV_MODE') === '1' || (defined('DEV_MODE') && DEV_MODE === true);
+if (!$isLocal || !$devMode) {
+    http_response_code(403);
+    echo 'Quick login is disabled.';
+    exit;
+}
+
 echo "<h2>Quick Login for Testing</h2>";
 
 // Set session for user 9 (who has the bookings)

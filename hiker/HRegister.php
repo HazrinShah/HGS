@@ -12,8 +12,15 @@ if (empty($_POST['username']) || empty($_POST['email']) || empty($_POST['passwor
 $username = $conn->real_escape_string($_POST['username']);
 $email = $conn->real_escape_string($_POST['email']);
 $password = $conn->real_escape_string($_POST['password']);
+$confirmPassword = $conn->real_escape_string($_POST['confirmPassword'] ?? '');
 $gender = $conn->real_escape_string($_POST['gender']);
 $phone = intval($_POST['phone_number']);
+
+// Password confirmation check (server-side guard)
+if ($password !== $confirmPassword) {
+    header("Location: HRegister.html?error=password_mismatch");
+    exit();
+}
 
 // Validate email format and existence
 $emailValidation = validateEmailForRegistration($email);

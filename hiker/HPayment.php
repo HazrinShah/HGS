@@ -1,5 +1,15 @@
-<?php
+    <?php
 session_start();
+include '../shared/db_connection.php';
+
+// Session debug: log entry with current user and URL
+try {
+    $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+    $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+    $uri = $_SERVER['REQUEST_URI'] ?? '';
+    $fullUrl = $scheme . '://' . $host . $uri;
+    error_log("HPayment.php ENTRY: hikerID=" . ($_SESSION['hikerID'] ?? 'N/A') . " URL=" . $fullUrl);
+} catch (Throwable $e) { /* ignore */ }
 
 // Check if user is logged in
 if (!isset($_SESSION['hikerID'])) {
@@ -14,18 +24,49 @@ $hikerID = $_SESSION['hikerID'];
 // Debug: Log successful session
 error_log("HPayment.php - User logged in with hikerID: $hikerID");
 
-// Database connection
+
 include '../shared/db_connection.php';
+ 
+// auto cancel booking yang lebih masa sebab tak bayo
+// interval kene tuko kalau kau tuko masa 
+if (isset($_SESSION['hikerID'])) {
+  $hikerID = (int)$_SESSION['hikerID'];
+  $sql = "
+      UPDATE booking
+      SET status = 'cancelled'
+      WHERE hikerID = ?
+        AND status = 'pending'
+        AND (
+          DATE(endDate) < CURRENT_DATE
+          OR (groupType = 'close' AND created_at < (NOW() - INTERVAL 5 MINUTE))
+        )
+  ";
+  if ($stmt = $conn->prepare($sql)) {
+    $stmt->bind_param('i', $hikerID);
+    $stmt->execute();
+    error_log('HPayment.php - Auto-cancel affected rows: ' . $stmt->affected_rows);
+    $stmt->close();
+  }
+}
 
 // Fetch pending bookings for the current user
-$bookingQuery = "SELECT b.*, g.username as guiderName, g.price as guiderPrice, m.name, m.picture 
-                 FROM booking b 
-                 JOIN guider g ON b.guiderID = g.guiderID 
-                 JOIN mountain m ON b.mountainID = m.mountainID 
-                 WHERE b.hikerID = ? AND b.status = 'pending' 
-                 ORDER BY b.created_at DESC";
+$bookingQuery = "
+  SELECT b.*, UNIX_TIMESTAMP(b.created_at) AS createdTs,
+         g.username as guiderName, g.price as guiderPrice, m.name, m.picture, bp.qty AS participantQty
+  FROM booking b
+  JOIN guider g ON b.guiderID = g.guiderID
+  JOIN mountain m ON b.mountainID = m.mountainID
+  LEFT JOIN bookingParticipant bp ON bp.bookingID = b.bookingID AND bp.hikerID = ?
+  WHERE b.status = 'pending'
+    AND (
+      (b.groupType = 'open' AND bp.hikerID IS NOT NULL)
+      OR
+      (b.groupType <> 'open' AND b.hikerID = ?)
+    )
+  ORDER BY b.created_at DESC
+";
 $stmt = $conn->prepare($bookingQuery);
-$stmt->bind_param("i", $hikerID);
+$stmt->bind_param("ii", $hikerID, $hikerID);
 $stmt->execute();
 $result = $stmt->get_result();
 $pendingBookings = $result->fetch_all(MYSQLI_ASSOC);
@@ -49,8 +90,6 @@ if (count($pendingBookings) > 0) {
     
     error_log("HPayment.php - All bookings for hikerID $hikerID: " . print_r($allBookings, true));
 }
-
-$conn->close();
 ?>
 
 <!DOCTYPE html>
@@ -58,7 +97,7 @@ $conn->close();
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Payment – Hiking Guidance System</title>
+  <title>Payment - Hiking Guidance System</title>
   <!-- Bootstrap & FontAwesome -->
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
   <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
@@ -176,7 +215,19 @@ $conn->close();
       grid-template-columns: 1fr 2fr 1fr;
       gap: 1.5rem;
       align-items: center;
+      position: relative;
+      overflow: visible;
     }
+
+    /* Ensure action buttons remain clickable; keep overall stacking normal so modal stays on top */
+    .main-content .container { position: relative; z-index: 1; pointer-events: auto; }
+    .booking-card { position: relative; z-index: 1; pointer-events: auto; }
+    .booking-actions { position: relative; z-index: 10001; }
+    .booking-actions .btn { position: relative; z-index: 10002; }
+    /* Ensure click events pass through to buttons */
+    .booking-actions, .booking-actions .btn { pointer-events: auto; }
+    /* Prevent the image block from intercepting clicks */
+    .mountain-image-container, .mountain-image { pointer-events: none; }
 
     .mountain-image {
       width: 100px;
@@ -567,6 +618,11 @@ $conn->close();
         transform: translateY(0) scale(1);
       }
     }
+    /* Ensure modal is above and backdrop uses dim dark (no blur) */
+    .modal { z-index: 40000 !important; }
+    .modal-dialog { z-index: 40001 !important; }
+    .modal-backdrop { z-index: 39990 !important; background: rgba(0,0,0,0.5) !important; }
+    .modal-backdrop.show { opacity: 0.5 !important; }
   </style>
 </head>
 <body>
@@ -608,6 +664,7 @@ $conn->close();
       </div>
     </nav>
   </header>
+<?php include_once '../shared/suspension_banner.php'; ?>
 
   <!-- Main Content -->
   <main class="main-content">
@@ -635,7 +692,101 @@ $conn->close();
       <?php else: ?>
         <!-- Pending Bookings -->
         <?php foreach ($pendingBookings as $booking): ?>
-          <div class="booking-card" data-booking-id="<?php echo $booking['bookingID']; ?>" data-created-time="<?php echo $booking['created_at']; ?>">
+          <?php
+            // Compute open-group closing and payment deadlines (3m recruit + 5m payment)
+            $closureTs = null; $paymentDeadlineTs = null; $recruitDeadlineTs = null; $isClosed = false;
+            if ($booking['groupType'] === 'open') {
+              // Ensure persistent closure table exists (Option B)
+              $conn->query("CREATE TABLE IF NOT EXISTS open_group_closure (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                guiderID INT NOT NULL,
+                mountainID INT NOT NULL,
+                startDate DATE NOT NULL,
+                endDate DATE NOT NULL,
+                closed_at INT NOT NULL,
+                UNIQUE KEY uniq_group (guiderID, mountainID, startDate, endDate)
+              ) ENGINE=InnoDB");
+
+              $stmt2 = $conn->prepare("\n                SELECT COALESCE(SUM(b2.totalHiker),0) AS existingHikers, UNIX_TIMESTAMP(MIN(b2.created_at)) AS groupStartTs\n                FROM booking b2\n                WHERE b2.mountainID = ?\n                  AND b2.guiderID = ?\n                  AND b2.groupType = 'open'\n                  AND b2.startDate <= ?\n                  AND b2.endDate >= ?\n                  AND b2.status IN ('pending','accepted','paid')\n              ");
+              $stmt2->bind_param('iiss', $booking['mountainID'], $booking['guiderID'], $booking['endDate'], $booking['startDate']);
+              $stmt2->execute();
+              $grp = $stmt2->get_result()->fetch_assoc();
+              $stmt2->close();
+              $existingHikers = (int)($grp['existingHikers'] ?? 0);
+              $groupStartTs = isset($grp['groupStartTs']) && $grp['groupStartTs'] ? (int)$grp['groupStartTs'] : time();
+              $recruitDeadlineTs = $groupStartTs + (3 * 60);
+              $isClosed = ($existingHikers >= 7) || (time() >= $recruitDeadlineTs);
+
+              // Read persistent closure time if available
+              $closureTs = null;
+              if ($qclose = $conn->prepare("SELECT closed_at FROM open_group_closure WHERE guiderID = ? AND mountainID = ? AND startDate = ? AND endDate = ? LIMIT 1")) {
+                $qclose->bind_param('iiss', $booking['guiderID'], $booking['mountainID'], $booking['startDate'], $booking['endDate']);
+                $qclose->execute();
+                $cres = $qclose->get_result()->fetch_assoc();
+                $qclose->close();
+                if ($cres && isset($cres['closed_at'])) { $closureTs = (int)$cres['closed_at']; }
+              }
+
+              // If group is closed and no record yet, persist the first close moment
+              if ($isClosed && empty($closureTs)) {
+                $firstCloseTs = ($existingHikers >= 7) ? time() : $recruitDeadlineTs;
+                if ($insc = $conn->prepare("INSERT IGNORE INTO open_group_closure (guiderID, mountainID, startDate, endDate, closed_at) VALUES (?,?,?,?,?)")) {
+                  $insc->bind_param('iissi', $booking['guiderID'], $booking['mountainID'], $booking['startDate'], $booking['endDate'], $firstCloseTs);
+                  $insc->execute();
+                  $insc->close();
+                  $closureTs = $firstCloseTs;
+                }
+                // In case of race and record exists, read again
+                if (empty($closureTs)) {
+                  if ($q2 = $conn->prepare("SELECT closed_at FROM open_group_closure WHERE guiderID = ? AND mountainID = ? AND startDate = ? AND endDate = ? LIMIT 1")) {
+                    $q2->bind_param('iiss', $booking['guiderID'], $booking['mountainID'], $booking['startDate'], $booking['endDate']);
+                    $q2->execute();
+                    $cres2 = $q2->get_result()->fetch_assoc();
+                    $q2->close();
+                    if ($cres2 && isset($cres2['closed_at'])) { $closureTs = (int)$cres2['closed_at']; }
+                  }
+                }
+              }
+
+              // If still not closed/persisted, leave paymentDeadlineTs empty until closure
+              if (!empty($closureTs)) {
+                $paymentDeadlineTs = $closureTs + (5 * 60);
+              }
+              // Auto-cancel if payment window passed
+              if (!empty($paymentDeadlineTs) && $booking['status'] === 'pending' && time() > $paymentDeadlineTs) {
+                if ($upd = $conn->prepare("UPDATE booking SET status = 'cancelled' WHERE bookingID = ? AND status = 'pending'")) {
+                  $upd->bind_param('i', $booking['bookingID']);
+                  $upd->execute();
+                  $upd->close();
+                }
+              }
+            } else {
+              // Close group: fixed 5-minute payment window from booking creation
+              $createdTs = isset($booking['createdTs']) ? (int)$booking['createdTs'] : (strtotime($booking['created_at'] ?? 'now') ?: time());
+              $paymentDeadlineTs = $createdTs ? ($createdTs + (5 * 60)) : (time() + (5 * 60));
+              // Auto-cancel if past 5-minute window
+              if ($booking['status'] === 'pending' && time() > $paymentDeadlineTs) {
+                if ($upd = $conn->prepare("UPDATE booking SET status = 'cancelled' WHERE bookingID = ? AND status = 'pending'")) {
+                  $upd->bind_param('i', $booking['bookingID']);
+                  $upd->execute();
+                  $upd->close();
+                }
+              }
+            }
+            // Authoritatively fetch the current user's participant qty for open groups (avoid stale/mismatched join data)
+            $userQty = (int)($booking['participantQty'] ?? 0);
+            if ($booking['groupType'] === 'open') {
+              if ($qp = $conn->prepare("SELECT qty FROM bookingParticipant WHERE bookingID = ? AND hikerID = ? LIMIT 1")) {
+                $bid = (int)$booking['bookingID'];
+                $qp->bind_param('ii', $bid, $hikerID);
+                $qp->execute();
+                $qr = $qp->get_result()->fetch_assoc();
+                $qp->close();
+                if ($qr && isset($qr['qty'])) { $userQty = (int)$qr['qty']; }
+              }
+            }
+          ?>
+          <div class="booking-card" data-booking-id="<?php echo $booking['bookingID']; ?>" data-created-time="<?php echo $booking['created_at']; ?>" data-created-ts="<?php echo (int)($booking['createdTs'] ?? 0); ?>" data-status="<?php echo htmlspecialchars($booking['status']); ?>" data-recruit-deadline="<?php echo isset($recruitDeadlineTs) ? date('c', $recruitDeadlineTs) : ''; ?>" data-recruit-deadline-ts="<?php echo isset($recruitDeadlineTs) ? $recruitDeadlineTs : ''; ?>" data-payment-deadline="<?php echo isset($paymentDeadlineTs) ? date('c', $paymentDeadlineTs) : ''; ?>" data-payment-deadline-ts="<?php echo isset($paymentDeadlineTs) ? $paymentDeadlineTs : ''; ?>" data-group-type="<?php echo htmlspecialchars($booking['groupType']); ?>" data-closed="<?php echo $isClosed ? '1' : '0'; ?>" data-total-hikers="<?php echo (int)$booking['totalHiker']; ?>" data-participant-qty="<?php echo (int)$userQty; ?>" data-group-price="<?php echo (float)$booking['guiderPrice']; ?>">
             <div class="booking-header">
               <h5 class="booking-title">
                 <i class="fas fa-mountain me-2"></i><?php echo htmlspecialchars($booking['name']); ?>
@@ -643,19 +794,35 @@ $conn->close();
               <span class="booking-status">
                 <i class="fas fa-clock me-1"></i>Pending
               </span>
+              <?php /* Forming countdown moved into the View button */ ?>
             </div>
             
             <div class="booking-content">
               <div class="mountain-image-container" style="display: flex; justify-content: center; align-items: center;">
-                <img src="<?php echo htmlspecialchars(strpos($booking['picture'], 'http') === 0 ? $booking['picture'] : '../' . $booking['picture']); ?>" 
+                <?php 
+                  $raw = $booking['picture'] ?? '';
+                  $raw = str_replace('\\', '/', $raw);
+                  if ($raw === '' || $raw === null) {
+                    $pic = 'https://via.placeholder.com/100';
+                  } elseif (strpos($raw, 'http') === 0) {
+                    $pic = $raw;
+                  } elseif (strpos($raw, '../') === 0) {
+                    $pic = $raw;
+                  } elseif (strpos($raw, '/') === 0) {
+                    $pic = '..' . $raw;
+                  } else {
+                    $pic = '../' . $raw;
+                  }
+                ?>
+                <img src="<?php echo htmlspecialchars($pic); ?>" 
                      alt="<?php echo htmlspecialchars($booking['name']); ?>" 
                      class="mountain-image">
               </div>
               
               <div class="booking-details">
                 <div class="booking-detail">
-                  <span class="booking-detail-label">Guider</span>
-                  <span class="booking-detail-value"><?php echo htmlspecialchars($booking['guiderName']); ?></span>
+                  <span class="booking-detail-label"><?php echo ($booking['groupType'] === 'open') ? 'Your Hikers' : 'Number of Hikers'; ?></span>
+                  <span class="booking-detail-value"><?php echo htmlspecialchars(($booking['groupType'] === 'open') ? (string)max(0,(int)($booking['participantQty'] ?? 0)) : (string)$booking['totalHiker']); ?></span>
                 </div>
                 <div class="booking-detail">
                   <span class="booking-detail-label">Start Date</span>
@@ -665,22 +832,80 @@ $conn->close();
                   <span class="booking-detail-label">End Date</span>
                   <span class="booking-detail-value"><?php echo date('M j, Y', strtotime($booking['endDate'])); ?></span>
                 </div>
-                <div class="booking-detail">
-                  <span class="booking-detail-label">Number of Hikers</span>
-                  <span class="booking-detail-value"><?php echo $booking['totalHiker']; ?> person(s)</span>
-                </div>
               </div>
               
-              <div class="booking-price">
-                <div class="price-amount">RM <?php echo number_format($booking['price'], 2); ?></div>
-                <div class="price-label">Total Amount</div>
-                <div class="booking-actions d-flex gap-2 mt-3">
-                  <button type="button" class="btn btn-outline-primary btn-sm" onclick="viewBookingDetails(<?php echo $booking['bookingID']; ?>)">
-                    <i class="fas fa-eye me-1"></i>View
-                  </button>
-                  <a href="HPayment1.php?bookingID=<?php echo $booking['bookingID']; ?>" class="btn btn-primary btn-sm">
-                    <i class="fas fa-credit-card me-1"></i>Make Payment
+              <?php
+              $participantQty = (int)$userQty;
+              $isOpen = ($booking['groupType'] === 'open');
+              $displayAmount = 0.0;
+              if ($isOpen) {
+                $totalH = max(1, (int)$booking['totalHiker']);
+                $perPerson = ((float)$booking['guiderPrice']) / $totalH;
+                $displayAmount = $perPerson * max(0, $participantQty);
+              } else {
+                $displayAmount = (float)$booking['price'];
+              }
+            ?>
+            <div class="booking-price">
+                <div class="price-amount">RM <?php echo number_format($displayAmount, 2); ?></div>
+                <div class="price-label"><?php echo $isOpen ? 'Your Amount' : 'Total Amount'; ?></div>
+            <div class="booking-actions d-flex gap-2 mt-3">
+                  <a href="HPayment1.php?bookingID=<?php echo $booking['bookingID']; ?>"
+                     class="btn btn-outline-primary btn-sm"
+                     data-action="view"
+                     data-view-id="<?php echo $booking['bookingID']; ?>"
+                     onclick="return openBookingModal(this);">
+                     <i class="fas fa-eye me-1"></i>View
                   </a>
+                  <?php
+                    // Determine if payment is allowed
+                    // Close group: allow immediately if pending and not expired
+                    // Open group: allow only after recruit closes (3m or 7 hikers), then within 5m payment window
+                    $isExpired = strtotime($booking['endDate'] . ' 23:59:59') < time();
+                    $status = isset($booking['status']) ? $booking['status'] : '';
+                    $canPay = false;
+
+                    if ($status === 'pending' && !$isExpired) {
+                      if ($booking['groupType'] === 'close') {
+                        $canPay = (isset($paymentDeadlineTs) && time() <= $paymentDeadlineTs);
+                      } else {
+                        $canPay = $isClosed && (isset($paymentDeadlineTs) && time() <= $paymentDeadlineTs);
+                      }
+                    }
+                    // Auto-cancel scenarios
+                    if ($status === 'pending') {
+                      if ($booking['groupType'] === 'open') {
+                        if (!empty($paymentDeadlineTs) && time() > $paymentDeadlineTs) {
+                          if ($upd = $conn->prepare("UPDATE booking SET status = 'cancelled' WHERE bookingID = ? AND status = 'pending'")) {
+                            $upd->bind_param('i', $booking['bookingID']);
+                            $upd->execute();
+                            $upd->close();
+                            $status = 'cancelled';
+                            $canPay = false;
+                          }
+                        }
+                      } else { // close group
+                        if ($isExpired || (!empty($paymentDeadlineTs) && time() > $paymentDeadlineTs)) {
+                          if ($upd2 = $conn->prepare("UPDATE booking SET status = 'cancelled' WHERE bookingID = ? AND status = 'pending'")) {
+                            $upd2->bind_param('i', $booking['bookingID']);
+                            $upd2->execute();
+                            $upd2->close();
+                            $status = 'cancelled';
+                            $canPay = false;
+                          }
+                        }
+                      }
+                    }
+                  ?>
+                  <?php if (!$canPay): ?>
+                    <button type="button" class="btn btn-secondary btn-sm" disabled title="Open group: 3m to form, then 5m to pay (or 7 hikers)">
+                      <i class="fas fa-lock me-1"></i>Waiting
+                    </button>
+                  <?php else: ?>
+                    <a href="HPayment1.php?bookingID=<?php echo $booking['bookingID']; ?>" class="btn btn-primary btn-sm">
+                      <i class="fas fa-credit-card me-1"></i>Make Payment
+                    </a>
+                  <?php endif; ?>
                   <button type="button" class="btn btn-outline-danger btn-sm" onclick="cancelBooking(<?php echo $booking['bookingID']; ?>)">
                     <i class="fas fa-times me-1"></i>Cancel
                   </button>
@@ -694,7 +919,7 @@ $conn->close();
   </main>
 
   <!-- Booking Details Modal -->
-  <div class="modal fade" id="bookingDetailsModal" tabindex="-1" aria-labelledby="bookingDetailsModalLabel" aria-hidden="true">
+  <div class="modal" id="bookingDetailsModal" tabindex="-1" aria-labelledby="bookingDetailsModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-lg">
       <div class="modal-content">
         <div class="modal-header">
@@ -802,63 +1027,139 @@ $conn->close();
     `;
     document.head.appendChild(style);
 
+
+
+    // Delegated listener: store ID only; rendering happens on modal events
+    document.addEventListener('click', function(ev){
+      const trigger = ev.target.closest('[data-action="view"]');
+      if (!trigger) return;
+      const idAttr = trigger.getAttribute('data-view-id');
+      const id = parseInt(idAttr || '0', 10);
+      window.lastViewBookingID = id;
+    }, true);
+
+
+    // After animation completes: rendering handled by openBookingModal()
+    document.getElementById('bookingDetailsModal').addEventListener('shown.bs.modal', function(){
+      // no-op; openBookingModal attaches a one-time shown handler per open
+    });
+
+    // Keyboard accessibility: Enter/Space on View button
+    document.addEventListener('keydown', function(ev){
+      if (ev.key !== 'Enter' && ev.key !== ' ') return;
+      const trigger = ev.target.closest('[data-action="view"]');
+      if (!trigger) return;
+      const card = trigger.closest('.booking-card');
+      if (!card) return;
+      ev.preventDefault();
+      const id = parseInt(card.getAttribute('data-booking-id') || '0', 10);
+      if (id) { openBookingModal(trigger); }
+    }, true);
+
+    // Single entry point to open the modal without glitches
+    function openBookingModal(triggerEl){
+      const idAttr = triggerEl.getAttribute('data-view-id') || (triggerEl.closest('.booking-card')?.getAttribute('data-booking-id') || '0');
+      const id = parseInt(idAttr || '0', 10);
+      if (!id) return false;
+      window.lastViewBookingID = id;
+      const modalEl = document.getElementById('bookingDetailsModal');
+      const bodyEl = document.getElementById('bookingDetailsContent');
+      if (bodyEl) {
+        bodyEl.innerHTML = '<div class="d-flex align-items-center justify-content-center py-5"><div class="spinner-border text-primary me-2" role="status"></div><span>Loading booking details...</span></div>';
+      }
+      // Clean up any stale Bootstrap state/backdrops before opening (defensive)
+      document.body.classList.remove('modal-open');
+      document.querySelectorAll('.modal-backdrop').forEach(function(el){ el.remove(); });
+      // Render details immediately to avoid perceived delay
+      try { viewBookingDetails(id); } catch(e) {}
+      try {
+        const modal = bootstrap ? bootstrap.Modal.getOrCreateInstance(modalEl) : null;
+        if (modal) modal.show();
+      } catch(e) {}
+      return false;
+    }
+
+    // Ensure full cleanup when modal is fully hidden
+    document.getElementById('bookingDetailsModal').addEventListener('hidden.bs.modal', function(){
+      document.body.classList.remove('modal-open');
+      document.querySelectorAll('.modal-backdrop').forEach(function(el){ el.remove(); });
+    });
+
+    // Helpers to extract values reliably after UI changes
+    function getValueByLabel(card, labelText) {
+      const rows = card.querySelectorAll('.booking-detail');
+      for (const row of rows) {
+        const lbl = row.querySelector('.booking-detail-label');
+        const val = row.querySelector('.booking-detail-value');
+        if (lbl && val && lbl.textContent.trim().toLowerCase().includes(labelText.toLowerCase())) {
+          return val.textContent.trim();
+        }
+      }
+      return '';
+    }
+
     // View booking details function
     function viewBookingDetails(bookingID) {
+      try { console.debug('[HPayment] viewBookingDetails start for', bookingID); } catch(e){}
       // Find the booking data from the current page
       const bookingCard = document.querySelector(`[data-booking-id="${bookingID}"]`);
       if (!bookingCard) {
+        try { console.warn('[HPayment] bookingCard not found for', bookingID); } catch(e){}
         notificationSystem.error('Error', 'Booking details not found');
         return;
       }
 
       // Extract booking information from the card
-      const mountainName = bookingCard.querySelector('.booking-title').textContent.replace('🏔️', '').trim();
-      const guiderName = bookingCard.querySelectorAll('.booking-detail-value')[0].textContent;
-      const startDate = bookingCard.querySelectorAll('.booking-detail-value')[1].textContent;
-      const endDate = bookingCard.querySelectorAll('.booking-detail-value')[2].textContent;
-      const totalHikers = bookingCard.querySelectorAll('.booking-detail-value')[3].textContent;
+      const mountainName = bookingCard.querySelector('.booking-title').textContent.trim();
+      const guiderName = getValueByLabel(bookingCard, 'Guider');
+      const startDate = getValueByLabel(bookingCard, 'Start Date');
+      const endDate = getValueByLabel(bookingCard, 'End Date');
+      const groupType = bookingCard.getAttribute('data-group-type') || '';
+      const partQty = bookingCard.getAttribute('data-participant-qty') || '';
+      const totalGroup = bookingCard.getAttribute('data-total-hikers') || '';
+      const totalHikers = (groupType === 'open') ? partQty : totalGroup;
       const price = bookingCard.querySelector('.price-amount').textContent;
       const createdTime = bookingCard.getAttribute('data-created-time');
 
-      // Create detailed content
+      // Compute pricing for open groups for display
+      const groupPrice = parseFloat(bookingCard.getAttribute('data-group-price') || '0');
+      const totalGroupInt = Math.max(1, parseInt(totalGroup || '1', 10));
+      const yourQtyInt = Math.max(0, parseInt(partQty || '0', 10));
+      const perPerson = groupType === 'open' ? (groupPrice / totalGroupInt) : groupPrice;
+      const yourAmount = groupType === 'open' ? (perPerson * yourQtyInt) : groupPrice;
+
+      // Create detailed content (closer to previous version but clearer for open groups)
       const content = `
         <div class="row">
           <div class="col-md-6">
             <h6 class="fw-bold text-primary mb-3">
               <i class="fas fa-mountain me-2"></i>Trip Information
             </h6>
-            <div class="mb-3">
-              <strong>Mountain:</strong> ${mountainName}
-            </div>
-            <div class="mb-3">
-              <strong>Guider:</strong> ${guiderName}
-            </div>
-            <div class="mb-3">
-              <strong>Start Date:</strong> ${startDate}
-            </div>
-            <div class="mb-3">
-              <strong>End Date:</strong> ${endDate}
-            </div>
-            <div class="mb-3">
-              <strong>Number of Hikers:</strong> ${totalHikers}
-            </div>
+            <div class="mb-2"><strong>Mountain:</strong> ${mountainName}</div>
+            <div class="mb-2"><strong>Guider:</strong> ${guiderName}</div>
+            <div class="mb-2"><strong>Start Date:</strong> ${startDate}</div>
+            <div class="mb-2"><strong>End Date:</strong> ${endDate}</div>
+            ${groupType === 'open'
+              ? `<div class="mb-2"><strong>Group Total Hikers:</strong> ${totalGroupInt}</div>
+                 <div class="mb-2"><strong>Your Hikers:</strong> ${yourQtyInt}</div>`
+              : `<div class="mb-2"><strong>Number of Hikers:</strong> ${totalGroupInt}</div>`
+            }
           </div>
           <div class="col-md-6">
             <h6 class="fw-bold text-primary mb-3">
               <i class="fas fa-credit-card me-2"></i>Payment Information
             </h6>
-            <div class="mb-3">
-              <strong>Total Amount:</strong> ${price}
-            </div>
-            <div class="mb-3">
-              <strong>Status:</strong> <span class="badge bg-warning">Pending Payment</span>
-            </div>
-            <div class="mb-3">
-              <strong>Booking ID:</strong> #${bookingID}
-            </div>
-            <div class="alert alert-warning">
+            ${groupType === 'open'
+              ? `<div class="mb-2"><strong>Group Price:</strong> RM ${groupPrice.toFixed(2)}</div>
+                 <div class="mb-2"><strong>Per Person:</strong> RM ${perPerson.toFixed(2)}</div>
+                 <div class="mb-2"><strong>Your Amount:</strong> RM ${yourAmount.toFixed(2)}</div>`
+              : `<div class="mb-2"><strong>Total Amount:</strong> ${price}</div>`
+            }
+            <div class="mb-2"><strong>Status:</strong> <span class="badge bg-warning">Pending Payment</span></div>
+            <div class="mb-2"><strong>Booking ID:</strong> #${bookingID}</div>
+            <div class="alert alert-warning mt-3">
               <i class="fas fa-clock me-2"></i>
-              <strong>Payment Deadline:</strong> 
+              <strong>Payment Deadline:</strong>
               <div class="mt-2">
                 <div class="countdown-timer" id="countdown-${bookingID}">
                   <span class="countdown-text">Calculating time remaining...</span>
@@ -870,75 +1171,98 @@ $conn->close();
         </div>
       `;
 
-      // Set content and show modal
+      // Set content only (modal already shown by openBookingModal)
       document.getElementById('bookingDetailsContent').innerHTML = content;
-      const modal = new bootstrap.Modal(document.getElementById('bookingDetailsModal'));
-      modal.show();
       
-      // Start countdown timer
-      startCountdown(bookingID, createdTime);
+      // Start modal countdown: prefer server-computed payment deadline if provided
+      let recruitSec = parseInt(bookingCard.dataset.recruitDeadlineTs || '0', 10);
+      let paySec = parseInt(bookingCard.dataset.paymentDeadlineTs || '0', 10);
+      const groupTypeAttr = (bookingCard.getAttribute('data-group-type') || '').toLowerCase();
+      if (!paySec && groupTypeAttr === 'close') {
+        const createdTs = parseInt(bookingCard.getAttribute('data-created-ts') || '0', 10);
+        if (createdTs) {
+          paySec = createdTs + (5 * 60);
+        }
+      }
+      startCountdown(bookingID, recruitSec ? recruitSec * 1000 : 0, paySec ? paySec * 1000 : 0);
     }
 
 
     
-    // Countdown timer function
-    // ni countdown timer untuk booking yang pending, tukar je kalau nak cepatkan countdown
-    function startCountdown(bookingID, createdTime) {
-      if (!createdTime) {
-        document.getElementById(`countdown-${bookingID}`).innerHTML = 
-          '<span class="countdown-text text-muted">Time information not available</span>';
+    // Countdown in modal: show 5-minute window only after forming ends
+    function startCountdown(bookingID, recruitMs, payMs) {
+      const el = document.getElementById(`countdown-${bookingID}`);
+      if (!el) return;
+
+      let formingTimer = null;
+      let payTimer = null;
+
+      const setupModalCleanup = () => {
+        const modalEl = document.getElementById('bookingDetailsModal');
+        if (!modalEl) return;
+        const onHide = () => {
+          if (formingTimer) clearInterval(formingTimer);
+          if (payTimer) clearInterval(payTimer);
+          modalEl.removeEventListener('hidden.bs.modal', onHide);
+        };
+        modalEl.addEventListener('hidden.bs.modal', onHide);
+      };
+
+      const now0 = Date.now();
+      if (recruitMs && now0 < recruitMs) {
+        const updateForming = () => {
+          const n = Date.now();
+          if (n < recruitMs) {
+            // Clamp display to max 3 minutes to avoid timezone drift showing hours
+            const rawLeft = Math.max(0, recruitMs - n);
+            const timeLeft = Math.min(rawLeft, 3 * 60 * 1000);
+            const minutes = Math.floor(timeLeft / (1000 * 60));
+            const seconds = Math.floor((timeLeft % (1000 * 60)) / 1000);
+            const timeString = `${minutes}m ${seconds}s`;
+            el.innerHTML = `<span class="countdown-text text-info fw-bold">Forming ends in ${timeString}</span>`;
+          } else {
+            if (formingTimer) clearInterval(formingTimer);
+            startPaymentCountdown();
+          }
+        };
+        formingTimer = setInterval(updateForming, 1000);
+        updateForming();
+        setupModalCleanup();
         return;
       }
 
-      const createdDate = new Date(createdTime);
-      const deadline = new Date(createdDate.getTime() + (5 * 60 * 60 * 1000)); // 5 hours from creation
-      
-      function updateCountdown() {
-        const now = new Date();
-        const timeLeft = deadline - now;
-        
-        if (timeLeft <= 0) {
-          document.getElementById(`countdown-${bookingID}`).innerHTML = 
-            '<span class="countdown-text text-danger fw-bold">EXPIRED - Booking will be cancelled</span>';
-          return;
-        }
-        
-        const hours = Math.floor(timeLeft / (1000 * 60 * 60));
-        const minutes = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
-        const seconds = Math.floor((timeLeft % (1000 * 60)) / 1000);
-        
-        let timeString = '';
-        if (hours > 0) {
-          timeString += `${hours}h `;
-        }
-        if (minutes > 0 || hours > 0) {
-          timeString += `${minutes}m `;
-        }
-        timeString += `${seconds}s`;
-        
-        // Color coding based on time remaining
-        let colorClass = 'text-success';
-        if (timeLeft < 30 * 60 * 1000) { // Less than 30 minutes
-          colorClass = 'text-danger';
-        } else if (timeLeft < 60 * 60 * 1000) { // Less than 1 hour
-          colorClass = 'text-warning';
-        }
-        
-        document.getElementById(`countdown-${bookingID}`).innerHTML = 
-          `<span class="countdown-text ${colorClass} fw-bold">${timeString}</span>`;
+      function startPaymentCountdown(){
+        if (!payMs) { el.innerHTML = '<span class="text-muted">No payment window info</span>'; return; }
+        const updatePay = () => {
+          const now = Date.now();
+          const timeLeft = payMs - now;
+          if (timeLeft <= 0) {
+            if (payTimer) clearInterval(payTimer);
+            el.innerHTML = '<span class="text-danger fw-bold">EXPIRED - Booking will be cancelled</span>';
+            return;
+          }
+          const hours = Math.floor(timeLeft / (1000 * 60 * 60));
+          const minutes = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
+          const seconds = Math.floor((timeLeft % (1000 * 60)) / 1000);
+          let timeString = '';
+          if (hours > 0) timeString += `${hours}h `;
+          if (minutes > 0 || hours > 0) timeString += `${minutes}m `;
+          timeString += `${seconds}s`;
+          let colorClass = 'text-success';
+          if (timeLeft < 10 * 1000) {
+            colorClass = 'text-danger';
+          } else if (timeLeft < 30 * 1000) {
+            colorClass = 'text-warning';
+          }
+          el.innerHTML = `<span class="countdown-text ${colorClass} fw-bold">${timeString}</span>`;
+        };
+        payTimer = setInterval(updatePay, 1000);
+        updatePay();
+        setupModalCleanup();
       }
-      
-      // Update immediately
-      updateCountdown();
-      
-      // Update every second
-      const countdownInterval = setInterval(updateCountdown, 1000);
-      
-      // Clear interval when modal is closed
-      const modal = document.getElementById('bookingDetailsModal');
-      modal.addEventListener('hidden.bs.modal', function() {
-        clearInterval(countdownInterval);
-      }, { once: true });
+
+      // If forming already ended when opening modal
+      startPaymentCountdown();
     }
 
     // Cancel booking function
@@ -1008,42 +1332,61 @@ $conn->close();
       }
     }
 
-    // Check for payment reminders on page load
+    // Check for payment reminders on page load (5-minute windows)
     document.addEventListener('DOMContentLoaded', function() {
-      // Check if there are any bookings approaching the 5-hour deadline
       const bookingCards = document.querySelectorAll('.booking-card');
       let hasExpiringBookings = false;
-      
+
+      // Use server time to compute remaining to avoid timezone/clock skew
+      const serverNowEl = document.getElementById('server-time');
+      const serverNowSec = parseInt(serverNowEl?.getAttribute('data-server-now-ts') || '0', 10);
+      const nowMs = serverNowSec ? (serverNowSec * 1000) : Date.now();
       bookingCards.forEach(card => {
         const bookingID = card.getAttribute('data-booking-id');
-        const createdTime = card.getAttribute('data-created-time');
-        
-        if (createdTime) {
-          const createdDate = new Date(createdTime);
-          const now = new Date();
-          const timeDiff = now - createdDate;
-          const hoursDiff = timeDiff / (1000 * 60 * 60);
-          
-          if (hoursDiff >= 4.5) { // Show warning at 4.5 hours
-            hasExpiringBookings = true;
-            const remainingHours = (5 - hoursDiff).toFixed(1);
-            if (remainingHours > 0) {
-              notificationSystem.warning('Payment Deadline Approaching', 
-                `Booking #${bookingID} expires in ${remainingHours} hours. Please complete payment soon!`, 30000);
-            } else {
-              notificationSystem.error('Payment Expired', 
-                `Booking #${bookingID} has expired. It will be automatically cancelled.`, 30000);
-            }
+        const groupType = (card.getAttribute('data-group-type') || '').toLowerCase();
+        const status = (card.getAttribute('data-status') || '').toLowerCase();
+        if (status !== 'pending') return;
+        let paySec = parseInt(card.getAttribute('data-payment-deadline-ts') || '0', 10);
+        if (groupType === 'close') {
+          const createdTs = parseInt(card.getAttribute('data-created-ts') || '0', 10);
+          if (createdTs) {
+            paySec = createdTs + (5 * 60);
           }
         }
+        if (!paySec) return; // No payment window yet (e.g., open group not formed)
+
+        const remainingMs = (paySec * 1000) - nowMs;
+        // Do not show an error on expiry; server will cancel if needed.
+        if (remainingMs <= 0) return;
+        if (remainingMs <= 60 * 1000) {
+          const secs = Math.ceil(remainingMs / 1000);
+          notificationSystem.warning('Payment Deadline Approaching', `Booking #${bookingID} expires in ${secs}s. Please complete payment now.`, 20000);
+          hasExpiringBookings = true;
+        }
       });
-      
-      // Show general reminder if there are pending bookings
+
       if (bookingCards.length > 0 && !hasExpiringBookings) {
-        notificationSystem.info('Payment Reminder', 
-          'You have pending bookings. Please complete payment within 5 hours to avoid automatic cancellation.', 30000);
+        notificationSystem.info('Payment Reminder', 'Payment window is 5 minutes: for close groups from creation, for open groups after the group forms.', 20000);
       }
     });
+  </script>
+
+  <!-- Server time anchor to avoid client clock skew -->
+  <div id="server-time" data-server-now-ts="<?php echo time(); ?>" style="display:none"></div>
+
+  <script>
+    (function(){
+      function pad(n){ return n < 10 ? '0' + n : '' + n; }
+      function fmt(ms){
+        const totalSec = Math.max(0, Math.floor(ms / 1000));
+        const m = Math.floor(totalSec / 60);
+        const s = totalSec % 60;
+        return pad(m) + ':' + pad(s);
+      }
+
+      // Removed per-card forming countdown on the button per request
+      document.addEventListener('DOMContentLoaded', function(){ /* no-op */ });
+    })();
   </script>
 
 </body>

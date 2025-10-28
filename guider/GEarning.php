@@ -1,4 +1,4 @@
-<?php
+﻿<?php
 session_start();
 if (!isset($_SESSION['guiderID'])) {
     header("Location: GLogin.html");
@@ -70,13 +70,13 @@ if ($guiderID) {
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Earn & Receive – Hiking Guidance System</title>
+  <title>Earn & Receive - Hiking Guidance System</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
   <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
   <style>
-    /* Guider Blue Color Scheme - Matching GBooking */
+    
     :root {
       --guider-blue: #1e40af;
       --guider-blue-light: #3b82f6;
@@ -102,7 +102,7 @@ if ($guiderID) {
       min-height: 100vh;
     }
 
-    /* Header - Matching GBooking */
+    
     .navbar {
       background: linear-gradient(135deg, var(--guider-blue-dark), var(--guider-blue)) !important;
       padding: 12px 0;
@@ -129,7 +129,7 @@ if ($guiderID) {
       object-fit: contain;
     }
 
-    /* Offcanvas Menu - Matching GBooking */
+    
     .offcanvas {
       background-color: var(--light-color);
     }
@@ -152,7 +152,7 @@ if ($guiderID) {
       background-color: rgba(30, 64, 175, 0.1);
       color: var(--guider-blue);
     }
-    /* Main Container - Matching GBooking */
+
     .main-container {
       padding: 2rem;
       max-width: 1400px;
@@ -184,7 +184,7 @@ if ($guiderID) {
       font-weight: 500;
     }
 
-    /* Card Container - Matching GBooking Style */
+    
     .card-container {
       background: var(--card-white);
       border-radius: 24px;
@@ -758,6 +758,8 @@ if ($guiderID) {
     </nav>
   </header>
 <!-- End Header -->
+
+<?php include_once '../shared/suspension_banner.php'; ?>
 
 <div class="main-container">
   <!-- Page Header -->
@@ -1417,7 +1419,7 @@ function printAllReceipts() {
     <body>
       <div class="summary-container">
         <div class="header">
-          <div class="logo">🏔️ HIKING GUIDANCE SYSTEM</div>
+          <div class="logo">ðŸ”ï¸ HIKING GUIDANCE SYSTEM</div>
           <div class="summary-title">EARNINGS SUMMARY</div>
           <div class="summary-date">Generated: ${new Date().toLocaleDateString('en-US', { 
             year: 'numeric', 

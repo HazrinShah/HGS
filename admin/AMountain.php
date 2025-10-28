@@ -26,6 +26,8 @@ if ($result->num_rows === 0) {
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_mountain'])) {
     $name = $_POST['mountain_name'];
     $location = $_POST['mountain_location'];
+    $latitude = isset($_POST['mountain_latitude']) && $_POST['mountain_latitude'] !== '' ? $_POST['mountain_latitude'] : null;
+    $longitude = isset($_POST['mountain_longitude']) && $_POST['mountain_longitude'] !== '' ? $_POST['mountain_longitude'] : null;
     $description = $_POST['mountain_description'];
 
     // Upload image
@@ -65,8 +67,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_mountain'])) {
     }
 
     // Insert into database
-    $stmt = $conn->prepare("INSERT INTO mountain (name, location, description, picture) VALUES (?, ?, ?, ?)");
-    $stmt->bind_param("ssss", $name, $location, $description, $imagePath);
+    $stmt = $conn->prepare("INSERT INTO mountain (name, location, latitude, longitude, description, picture) VALUES (?, ?, ?, ?, ?, ?)");
+    $stmt->bind_param("ssddss", $name, $location, $latitude, $longitude, $description, $imagePath);
 
     if ($stmt->execute()) {
         // PRG: Redirect after successful POST
@@ -81,11 +83,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_mountain'])) {
 
 }
 
-  // Update Mountain
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_mountain'])) {
+  // Update Mountain (only when explicit update_mountain flag is present)
+if (
+  $_SERVER['REQUEST_METHOD'] === 'POST' &&
+  isset($_POST['update_mountain'])
+) {
     $mountainID = $_POST['mountain_id'];
     $name = $_POST['mountain_name'];
     $location = $_POST['mountain_location'];
+    $latStr = isset($_POST['mountain_latitude']) ? trim((string)$_POST['mountain_latitude']) : '';
+    $lngStr = isset($_POST['mountain_longitude']) ? trim((string)$_POST['mountain_longitude']) : '';
     $description = $_POST['mountain_description'];
 
     // Get current image path
@@ -100,11 +107,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_mountain'])) {
 
     // Handle new image upload
     if (isset($_FILES['mountain_image']) && $_FILES['mountain_image']['error'] === 0) {
-        $allowedTypes = ['image/jpeg', 'image/png', 'image/gif'];
-        $fileType = mime_content_type($_FILES['mountain_image']['tmp_name']);
+      $allowedTypes = ['image/jpeg', 'image/png', 'image/gif'];
+      $fileType = mime_content_type($_FILES['mountain_image']['tmp_name']);
 
-        if (in_array($fileType, $allowedTypes)) {
+      if (in_array($fileType, $allowedTypes)) {
             $targetDir = "../upload/";
+            if (!is_dir($targetDir)) { @mkdir($targetDir, 0755, true); }
             $imageName = basename($_FILES['mountain_image']['name']);
             $targetFile = $targetDir . time() . "_" . $imageName;
 
@@ -115,20 +123,59 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_mountain'])) {
                     unlink($currentImage);
                 }
             }
-        }
+      }
     }
 
-    // Update database
-    $stmt = $conn->prepare("UPDATE mountain SET name=?, location=?, description=?, picture=? WHERE mountainID=?");
-    $stmt->bind_param("ssssi", $name, $location, $description, $imagePath, $mountainID);
+    // Update database: build SET clause dynamically for coords to avoid driver casting issues
+    $set = "name = ?, location = ?, description = ?, picture = ?";
+    $types = "ssss";
+    $vals = [$name, $location, $description, $imagePath];
+    if ($latStr !== '') { $set .= ", latitude = ?"; $types .= "d"; $vals[] = (float)$latStr; }
+    if ($lngStr !== '') { $set .= ", longitude = ?"; $types .= "d"; $vals[] = (float)$lngStr; }
+    $sql = "UPDATE mountain SET $set WHERE mountainID = ?";
+    $types .= "i"; $vals[] = (int)$mountainID;
+
+    $stmt = $conn->prepare($sql);
+    if (!$stmt) {
+        error_log("AMountain UPDATE prepare failed: " . $conn->error);
+        header("Location: AMountain.php?error=" . urlencode("Failed to prepare update: " . $conn->error));
+        exit();
+    }
+
+    $stmt->bind_param($types, ...$vals);
+
+    // Temporary debug logs
+    error_log("AMountain UPDATE POST: " . print_r($_POST, true));
+    error_log("AMountain UPDATE SQL: $sql types=$types vals=" . json_encode($vals));
 
     if ($stmt->execute()) {
+        error_log("AMountain UPDATE affected_rows=" . $stmt->affected_rows);
         header("Location: AMountain.php?success=" . urlencode("Mountain updated successfully!"));
         exit();
     } else {
+        error_log("AMountain UPDATE execute error: " . $stmt->error);
         header("Location: AMountain.php?error=" . urlencode("Failed to update mountain: " . $stmt->error));
         exit();
     }
+}
+
+$locations = [];
+$sql = "SELECT name, description, latitude, longitude FROM mountain WHERE latitude IS NOT NULL AND longitude IS NOT NULL";
+if ($res = $conn->query($sql)) {
+  while ($r = $res->fetch_assoc()) {
+    $locations[] = [
+      'name' => $r['name'],
+      'description' => $r['description'],
+      'lat' => isset($r['latitude']) ? (float)$r['latitude'] : null,
+      'lng' => isset($r['longitude']) ? (float)$r['longitude'] : null,
+    ];
+  }
+}
+// Optional JSON endpoint for map data
+if (isset($_GET['mapData'])) {
+  header('Content-Type: application/json');
+  echo json_encode($locations);
+  exit();
 }
 ?>
 
@@ -227,21 +274,24 @@ $mountains = $result->fetch_all(MYSQLI_ASSOC);
 
     .sidebar {
       background: linear-gradient(135deg, #571785 0%, #4a0f6b 100%) !important;
-      width: 300px;
-      height: 500px;
-      margin-top: 45px;
-      margin-left: 20px;
-      padding: 20px 10px;
-      border-radius: 25px;
+      position: fixed;
+      top: 0;
+      left: -350px;
+      width: 320px;
+      height: 100vh;
+      margin: 0;
+      padding: 100px 15px 20px 15px !important;
+      border-radius: 0;
       box-shadow: 0 8px 32px rgba(87, 23, 133, 0.4);
       border: 2px solid rgba(255, 255, 255, 0.1);
-      position: relative;
-      flex-shrink: 0;
+      z-index: 1000;
+      transition: left 0.3s ease;
+      overflow-y: auto;
     }
 
     /* Mobile Menu Button */
     .mobile-menu-btn {
-      display: none;
+      display: inline-flex;
       position: fixed;
       top: 15px;
       left: 15px;
@@ -286,13 +336,36 @@ $mountains = $result->fetch_all(MYSQLI_ASSOC);
       color: #ffffff;
       font-weight: 600;
       text-decoration: none;
-      margin-bottom: 8px;
+      margin-bottom: 12px;
       border-radius: 12px;
       transition: all 0.3s ease;
       border: 1px solid transparent;
       position: relative;
       overflow: hidden;
     }
+
+    .sidebar .menu a::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: -100%;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+      transition: left 0.5s;
+    }
+
+    .sidebar .menu a:hover::before {
+      left: 100%;
+    }
+
+    /* Active state matches AUser */
+    .sidebar .menu a.active {
+      background: rgba(255, 255, 255, 0.2);
+      border-color: rgba(255, 255, 255, 0.4);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    }
+
 
     .sidebar .menu a:hover {
       background: rgba(255, 255, 255, 0.15);
@@ -317,27 +390,93 @@ $mountains = $result->fetch_all(MYSQLI_ASSOC);
     }
 
     @media (max-width: 768px) {
-      .mobile-menu-btn { display: block; }
+      .mobile-menu-btn { 
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        position: static;
+        padding: 10px 12px;
+        z-index: 1001;
+      }
+
+      /* Make navbar fixed at top for mobile */
+      .navbar {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: 1002;
+        width: 100%;
+      }
+
+      /* Adjust body padding to account for fixed navbar */
+      body {
+        padding-top: 80px;
+      }
+
       .sidebar {
         position: fixed;
         top: 0;
-        left: -320px;
-        width: 280px;
+        left: -350px;
+        width: 320px;
         height: 100vh;
         margin: 0;
         border-radius: 0;
         z-index: 1000;
         transition: left 0.3s ease;
         overflow-y: auto;
+        padding: 20px 15px;
       }
-      .sidebar.mobile-open { left: 0; }
-      .main-content { margin-left: 0; padding: 80px 15px 20px 15px; width: 100%; }
-      .wrapper { flex-direction: column; }
+      .sidebar.mobile-open { 
+        left: 0; 
+      }
+      .wrapper { 
+        flex-direction: column; 
+      }
+      .main-content { 
+        margin-left: 0; 
+        padding: 80px 15px 20px 15px; 
+        width: 100%; 
+      }
+
+      /* Improve menu text readability on mobile */
+      .sidebar .menu a {
+        padding: 18px 20px;
+        font-size: 16px;
+        font-weight: 600;
+      }
+      .sidebar .menu i {
+        margin-right: 18px;
+        font-size: 20px;
+        width: 24px;
+      }
     }
 
     .main-content {
         flex-grow: 1;
         padding: 30px;
+    }
+
+    /* Page header (match AUser) */
+    .page-header {
+      text-align: center;
+      margin-bottom: 3rem;
+      padding: 2rem 0;
+    }
+    .page-title {
+      font-size: 2.5rem;
+      font-weight: 700;
+      margin-bottom: 0.5rem;
+      background: linear-gradient(135deg, #4a0f6b, #571785);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .page-subtitle {
+      font-size: 1.1rem;
+      color: #64748b;
+      font-weight: 500;
+      margin: 0;
     }
 
     .content-title {
@@ -346,6 +485,7 @@ $mountains = $result->fetch_all(MYSQLI_ASSOC);
       text-align: left;
       margin-bottom: 10px;
     }
+
 
     .content-card {
     background-color: white;
@@ -441,19 +581,75 @@ $mountains = $result->fetch_all(MYSQLI_ASSOC);
         background-color: #571785;
     }
 
+    /* API-ready map placeholder */
+    .map-placeholder {
+      height: 110px;
+      min-width: 160px;
+      background: repeating-linear-gradient(
+        45deg,
+        #f3eefe,
+        #f3eefe 10px,
+        #ece3fc 10px,
+        #ece3fc 20px
+      );
+      border: 1px dashed #c7b3e6;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #7a5cae;
+      font-weight: 600;
+    }
+
     .wrapper {
-    display: flex;
-    min-height: 100vh;
+      display: flex;
+      min-height: 100vh;
+      flex-direction: column;
     }
 
 
 
+    /* Hamburger-only navigation across all screen sizes */
+    .navbar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 1002;
+      width: 100%;
+    }
+
+    body {
+      padding-top: 80px;
+    }
+
+    /* Off-canvas sidebar */
+    .sidebar { }
+
+    .sidebar.mobile-open {
+      left: 0;
+    }
+
+    /* Hamburger inline in header at all sizes */
+    .mobile-menu-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      position: static;
+      padding: 10px 12px;
+      z-index: 1001;
+    }
+
+    /* Content should not reserve space for sidebar */
+    .wrapper { flex-direction: column; }
+    .main-content {
+      margin-left: 0;
+      padding: 80px 15px 20px 15px;
+      width: 100%;
+    }
   </style>
 </head>
 <body>
-
-  <!-- Mobile Menu Button -->
-  <button class="mobile-menu-btn" onclick="toggleMobileMenu()"><i class="bi bi-list"></i></button>
 
   <!-- Mobile Overlay -->
   <div class="mobile-overlay" onclick="closeMobileMenu()"></div>
@@ -462,6 +658,10 @@ $mountains = $result->fetch_all(MYSQLI_ASSOC);
     <header>
     <nav class="navbar">
         <div class="container d-flex align-items-center">
+        <!-- Hamburger inside header (mobile only) -->
+        <button class="mobile-menu-btn me-2" onclick="toggleMobileMenu()">
+            <i class="bi bi-list"></i>
+        </button>
         <!-- Logo and Admin text (left side) -->
         <a class="navbar-brand d-flex align-items-center" href="../index.html">
             <img src="../img/logo.png" class="img-fluid logo me-2" alt="HGS Logo" style="width: 50px; height: 50px;">
@@ -482,10 +682,11 @@ $mountains = $result->fetch_all(MYSQLI_ASSOC);
         <strong class="ms-2 text-white">Menu</strong>
         </div>
         <div class="menu mt-4">
-        <a href="ADashboard.html" ><i class="bi bi-grid-fill"></i> Dashboard</a>
+        <a href="ADashboard.html"><i class="bi bi-grid-fill"></i> Dashboard</a>
         <a href="AUser.html"><i class="bi bi-people-fill"></i> User</a>
-        <a href="AMountain.php"><i class="bi bi-triangle-fill"></i> Mountain</a>
-        <a href="AReport.html"><i class="bi bi-file-earmark-text-fill"></i> Reports</a>
+        <a href="AMountain.php" class="active"><i class="bi bi-triangle-fill"></i> Mountain</a>
+        <a href="AAppeal.php"><i class="bi bi-chat-dots-fill"></i> Appeal</a>
+        <a href="AReport.php"><i class="bi bi-file-earmark-text-fill"></i> Reports</a>
         <div class="text-center mt-4">
             <form action="../shared/logout.php" method="POST" class="d-flex justify-content-center">
                 <button class="btn btn-danger logout-btn w-50" type="submit">
@@ -498,6 +699,10 @@ $mountains = $result->fetch_all(MYSQLI_ASSOC);
 
     <div class="main-content">
     <div class="container">
+        <div class="page-header">
+          <h1 class="page-title">Mountain Management</h1>
+          <p class="page-subtitle">Manage and organize mountains in the system</p>
+        </div>
         <div class="row g-4">
         <div class="col-md-6">
             <div class="content-card">
@@ -548,6 +753,18 @@ $mountains = $result->fetch_all(MYSQLI_ASSOC);
                                 <input type="text" class="form-control" name="mountain_location" required>
                             </div>
 
+                            <!-- Coordinates -->
+                            <div class="row g-2">
+                              <div class="col-md-6">
+                                <label class="form-label">Latitude</label>
+                                <input type="number" step="0.000001" min="-90" max="90" class="form-control" name="mountain_latitude" placeholder="e.g. 4.476400">
+                              </div>
+                              <div class="col-md-6">
+                                <label class="form-label">Longitude</label>
+                                <input type="number" step="0.000001" min="-180" max="180" class="form-control" name="mountain_longitude" placeholder="e.g. 101.378900">
+                              </div>
+                            </div>
+
                             <!-- Description -->
                             <div class="mb-3">
                                 <label class="form-label">Description</label>
@@ -583,6 +800,8 @@ $mountains = $result->fetch_all(MYSQLI_ASSOC);
                     <div class="modal fade" id="editMountainModal" tabindex="-1" aria-labelledby="editMountainModalLabel" aria-hidden="true">
                     <div class="modal-dialog">
                         <form method="POST" action="AMountain.php" enctype="multipart/form-data">
+                        <input type="hidden" name="update_mountain" value="1">
+
                         <div class="modal-content">
                             <div class="modal-header">
                             <h5 class="modal-title" id="editMountainModalLabel">Edit Mountain</h5>
@@ -620,6 +839,18 @@ $mountains = $result->fetch_all(MYSQLI_ASSOC);
                                 <input type="text" class="form-control" name="mountain_location" id="editMountainLocation" required>
                             </div>
 
+                            <!-- Coordinates -->
+                            <div class="row g-2">
+                              <div class="col-md-6">
+                                <label class="form-label">Latitude</label>
+                                <input type="number" step="0.000001" min="-90" max="90" class="form-control" name="mountain_latitude" id="editMountainLatitude" placeholder="e.g. 4.476400">
+                              </div>
+                              <div class="col-md-6">
+                                <label class="form-label">Longitude</label>
+                                <input type="number" step="0.000001" min="-180" max="180" class="form-control" name="mountain_longitude" id="editMountainLongitude" placeholder="e.g. 101.378900">
+                              </div>
+                            </div>
+
                             <!-- Description -->
                             <div class="mb-3">
                                 <label class="form-label">Description</label>
@@ -640,13 +871,58 @@ $mountains = $result->fetch_all(MYSQLI_ASSOC);
                             </div>
 
                         <script>
-                        // Add loading state on form submission
-                        document.querySelector('form').addEventListener('submit', function() {
-                            const btn = document.getElementById('updateMountainBtn');
-                            btn.querySelector('.submit-text').classList.add('d-none');
-                            btn.querySelector('.spinner-border').classList.remove('d-none');
-                            btn.disabled = true;
-                        });
+                        // Add loading state on Edit form submission (guard against null)
+                        (function(){
+                          const modal = document.getElementById('editMountainModal');
+                          const formEl = modal ? modal.querySelector('form') : null;
+                          if (formEl) {
+                            formEl.addEventListener('submit', function() {
+                              const btn = document.getElementById('updateMountainBtn');
+                              if (!btn) return;
+                              const txt = btn.querySelector('.submit-text');
+                              const spn = btn.querySelector('.spinner-border');
+                              if (txt) txt.classList.add('d-none');
+                              if (spn) spn.classList.remove('d-none');
+                              btn.disabled = true;
+                            });
+                          }
+                        })();
+
+                        // Populate Edit modal on open
+                        const editModalEl = document.getElementById('editMountainModal');
+                        if (editModalEl) {
+                          editModalEl.addEventListener('show.bs.modal', function (event) {
+                            const trigger = event.relatedTarget;
+                            if (!trigger) return;
+                            const id = trigger.getAttribute('data-id');
+                            const name = trigger.getAttribute('data-name') || '';
+                            const location = trigger.getAttribute('data-location') || '';
+                            const description = trigger.getAttribute('data-description') || '';
+                            const latitude = trigger.getAttribute('data-latitude') || '';
+                            const longitude = trigger.getAttribute('data-longitude') || '';
+                            const image = trigger.getAttribute('data-image') || '../img/mountain-default.jpg';
+
+                            document.getElementById('editMountainId').value = id;
+                            document.getElementById('editMountainName').value = name;
+                            document.getElementById('editMountainLocation').value = location;
+                            document.getElementById('editMountainDescription').value = description;
+                            const latEl = document.getElementById('editMountainLatitude');
+                            const lngEl = document.getElementById('editMountainLongitude');
+                            if (latEl) latEl.value = latitude;
+                            if (lngEl) lngEl.value = longitude;
+
+                            const imgEl = document.getElementById('editMountainImagePreview');
+                            if (imgEl) {
+                              let src = image.replace(/\\\\/g, '/');
+                              if (!/^https?:\/\//.test(src)) {
+                                if (src.startsWith('../')) { /* keep */ }
+                                else if (src.startsWith('/')) src = '..' + src;
+                                else src = '../' + src;
+                              }
+                              imgEl.src = src;
+                            }
+                          });
+                        }
                         </script>
                         </div>
                         </form>
@@ -674,7 +950,10 @@ $mountains = $result->fetch_all(MYSQLI_ASSOC);
                             <th>Picture</th>
                             <th>Name</th>
                             <th>Location</th>
+                            <th>Latitude</th>
+                            <th>Longitude</th>
                             <th>Description</th>
+                            <th>Map</th>
                             <th>Action</th>
                         </tr>
                         </thead>
@@ -684,11 +963,38 @@ $mountains = $result->fetch_all(MYSQLI_ASSOC);
                             <?php static $count = 1; ?>
                             <td><?= $count++ ?></td>
                             <td>
-                                <img src="<?= $row['picture'] ?>" alt="Mountain" style="width: 100px; height: 60px; object-fit: cover; border-radius: 8px;">
+                                <?php 
+                                  $img = $row['picture'] ?? '';
+                                  $img = str_replace('\\', '/', $img);
+                                  if ($img === '' || $img === null) {
+                                    $mountainSrc = '../img/mountain-default.jpg';
+                                  } elseif (strpos($img, 'http') === 0) {
+                                    $mountainSrc = $img;
+                                  } elseif (strpos($img, '../') === 0) {
+                                    $mountainSrc = $img;
+                                  } elseif (strpos($img, '/') === 0) {
+                                    $mountainSrc = '..' . $img;
+                                  } else {
+                                    $mountainSrc = '../' . $img;
+                                  }
+                                ?>
+                                <img src="<?= htmlspecialchars($mountainSrc) ?>" alt="Mountain" style="width: 100px; height: 60px; object-fit: cover; border-radius: 8px;" onerror="this.src='../img/mountain-default.jpg'">
                             </td>
                             <td><?= htmlspecialchars($row['name']) ?></td>
                             <td><?= htmlspecialchars($row['location']) ?></td>
+                            <td><?= htmlspecialchars($row['latitude'] ?? '') ?></td>
+                            <td><?= htmlspecialchars($row['longitude'] ?? '') ?></td>
                             <td><?= htmlspecialchars($row['description']) ?></td>
+                            <td class="text-center">
+                                <div class="map-placeholder"
+                                     id="map-<?= (int)$row['mountainID'] ?>"
+                                     data-location="<?= htmlspecialchars($row['location'] ?? '') ?>"
+                                     data-name="<?= htmlspecialchars($row['name'] ?? '') ?>"
+                                     data-latitude="<?= htmlspecialchars($row['latitude'] ?? '') ?>"
+                                     data-longitude="<?= htmlspecialchars($row['longitude'] ?? '') ?>">
+                                  <!-- per-row map will render here -->
+                                </div>
+                            </td>
                             <td class="text-center">
                                 <!-- Edit button with data attributes -->
                                 <button type="button" class="btn btn-primary mb-2" 
@@ -698,6 +1004,8 @@ $mountains = $result->fetch_all(MYSQLI_ASSOC);
                                     data-name="<?= htmlspecialchars($row['name']) ?>"
                                     data-location="<?= htmlspecialchars($row['location']) ?>"
                                     data-description="<?= htmlspecialchars($row['description']) ?>"
+                                    data-latitude="<?= htmlspecialchars($row['latitude'] ?? '') ?>"
+                                    data-longitude="<?= htmlspecialchars($row['longitude'] ?? '') ?>"
                                     data-image="<?= $row['picture'] ?>">
                                     <i class="bi bi-pencil-square"></i>
                                 </button>
@@ -730,38 +1038,81 @@ $mountains = $result->fetch_all(MYSQLI_ASSOC);
 
 
 
+  <!-- Define initMap before loading the Google Maps script -->
+  <script>
+    // Minimal init so callback exists; renderRowMaps will run after load
+    window.initMap = function() {
+      try { if (typeof renderRowMaps === 'function') renderRowMaps(); } catch (e) { console.error(e); }
+    };
+  </script>
+  <!-- Google Maps API (best practice: loading=async) -->
+  <script async
+    src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBQBKen6oHNUxX1Mg6lL5rZMVy_LReklqY&loading=async&callback=initMap">
+  </script>
+
+  <!-- MarkerClusterer (for many markers) -->
+  <script src="https://unpkg.com/@googlemaps/markerclusterer/dist/index.min.js"></script>
+
+
+
+
 
     <script>
-    // Mobile menu toggle function
-    function toggleMobileMenu() {
-      const sidebar = document.querySelector('.sidebar');
-      const mobileBtn = document.querySelector('.mobile-menu-btn');
-      const overlay = document.querySelector('.mobile-overlay');
-      
-      sidebar.classList.toggle('mobile-open');
-      overlay.classList.toggle('show');
-      
-      // Change icon based on state
-      const icon = mobileBtn.querySelector('i');
-      if (sidebar.classList.contains('mobile-open')) {
-        icon.className = 'bi bi-x';
-      } else {
-        icon.className = 'bi bi-list';
-      }
+    // Render mini maps in each table row's Map column
+    function renderRowMaps() {
+      if (!(window.google && google.maps)) return;
+      document.querySelectorAll('.map-placeholder').forEach(function(el){
+        const lat = parseFloat(el.getAttribute('data-latitude'));
+        const lng = parseFloat(el.getAttribute('data-longitude'));
+        const hasCoords = !isNaN(lat) && !isNaN(lng);
+        if (!hasCoords) { el.textContent = 'No coordinates'; return; }
+        const m = new google.maps.Map(el, {
+          center: { lat, lng },
+          zoom: 10,
+          disableDefaultUI: true,
+          gestureHandling: 'none',
+        });
+        new google.maps.Marker({ position: { lat, lng }, map: m });
+
+        // Make the mini map clickable to open Google Maps at this coordinate
+        el.style.cursor = 'pointer';
+        el.title = 'Open in Google Maps';
+        el.addEventListener('click', function(){
+          const url = `https://www.google.com/maps?q=${lat},${lng}`;
+          window.open(url, '_blank', 'noopener');
+        });
+      });
     }
 
+    // Ensure renderRowMaps is called when Google Maps init completes
+    // If maps already loaded (macam hot reload contohnya), attempt render
+    if (window.google && google.maps) { try { renderRowMaps(); } catch(e) { console.error(e); } }
+
+    // Mobile menu toggle function
+  function toggleMobileMenu() {
+    const sidebar = document.querySelector('.sidebar');
+    const mobileBtn = document.querySelector('.mobile-menu-btn');
+    const overlay = document.querySelector('.mobile-overlay');
+    if (!sidebar || !overlay) return;
+    const isOpen = sidebar.classList.toggle('mobile-open');
+    overlay.classList.toggle('show', isOpen);
+    document.body.style.overflow = isOpen ? 'hidden' : 'auto';
+    const icon = mobileBtn && mobileBtn.querySelector('i');
+    if (icon) icon.className = isOpen ? 'bi bi-x' : 'bi bi-list';
+  }
+
     // Close mobile menu function
-    function closeMobileMenu() {
-      const sidebar = document.querySelector('.sidebar');
-      const mobileBtn = document.querySelector('.mobile-menu-btn');
-      const overlay = document.querySelector('.mobile-overlay');
-      
-      sidebar.classList.remove('mobile-open');
-      overlay.classList.remove('show');
-      
-      const icon = mobileBtn.querySelector('i');
-      icon.className = 'bi bi-list';
-    }
+  function closeMobileMenu() {
+    const sidebar = document.querySelector('.sidebar');
+    const mobileBtn = document.querySelector('.mobile-menu-btn');
+    const overlay = document.querySelector('.mobile-overlay');
+    if (!sidebar || !overlay) return;
+    sidebar.classList.remove('mobile-open');
+    overlay.classList.remove('show');
+    document.body.style.overflow = 'auto';
+    const icon = mobileBtn && mobileBtn.querySelector('i');
+    if (icon) icon.className = 'bi bi-list';
+  }
 
     // Close mobile menu when clicking outside
     document.addEventListener('click', function(event) {
@@ -773,6 +1124,18 @@ $mountains = $result->fetch_all(MYSQLI_ASSOC);
           closeMobileMenu();
         }
       }
+    });
+
+    // Close on ESC key (match AUser)
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') {
+        closeMobileMenu();
+      }
+    });
+
+    // Close when any sidebar link is clicked (match AUser)
+    document.querySelectorAll('.sidebar .menu a').forEach(function(a) {
+      a.addEventListener('click', closeMobileMenu);
     });
     </script>
 
@@ -825,23 +1188,7 @@ document.getElementById('editMountainImageInput').addEventListener('change', fun
     }
 });
 
-// Handle edit modal data population
-document.getElementById('editMountainModal').addEventListener('show.bs.modal', function(event) {
-    const button = event.relatedTarget; // Button that triggered the modal
-    const id = button.getAttribute('data-id');
-    const name = button.getAttribute('data-name');
-    const location = button.getAttribute('data-location');
-    const description = button.getAttribute('data-description');
-    const image = button.getAttribute('data-image');
-    
-    // Update modal content
-    const modal = this;
-    modal.querySelector('#editMountainId').value = id;
-    modal.querySelector('#editMountainName').value = name;
-    modal.querySelector('#editMountainLocation').value = location;
-    modal.querySelector('#editMountainDescription').value = description;
-    modal.querySelector('#editMountainImagePreview').src = image;
-});
+// Duplicate simple handler removed; robust handler above normalizes paths and sets coordinates
 
 // Handle delete modal data population
 document.getElementById('deleteMountainModal').addEventListener('show.bs.modal', function(event) {

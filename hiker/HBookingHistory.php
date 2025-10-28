@@ -33,8 +33,26 @@ $result = $stmt->get_result();
 $bookings = $result->fetch_all(MYSQLI_ASSOC);
 $stmt->close();
 
+// Fetch appeal history (cancelled/refunded/resolved/rejected)
+$appealHistory = [];
+$appealQuery = "SELECT a.*, b.startDate, b.endDate, b.price, g.username as guiderName, m.name as mountainName, m.picture as mountainPicture
+                FROM appeal a
+                JOIN booking b ON a.bookingID = b.bookingID
+                JOIN guider g ON b.guiderID = g.guiderID
+                JOIN mountain m ON b.mountainID = m.mountainID
+                WHERE b.hikerID = ? AND a.status IN ('cancelled','refunded','resolved','rejected')
+                ORDER BY a.updatedAt DESC, a.createdAt DESC";
+$stmt = $conn->prepare($appealQuery);
+$stmt->bind_param("i", $hikerID);
+$stmt->execute();
+$result = $stmt->get_result();
+$appealHistory = $result->fetch_all(MYSQLI_ASSOC);
+$stmt->close();
 
 $conn->close();
+
+// Determine active tab (appeals or bookings)
+$activeTab = isset($_GET['tab']) && in_array($_GET['tab'], ['appeals','bookings']) ? $_GET['tab'] : 'appeals';
 ?>
 
 <!DOCTYPE html>
@@ -42,7 +60,7 @@ $conn->close();
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Booking History – Hiking Guidance System</title>
+  <title>Booking History - Hiking Guidance System</title>
   <!-- Bootstrap & FontAwesome -->
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
   <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
@@ -75,6 +93,22 @@ $conn->close();
     .page-header {
       margin-bottom: 2rem;
     }
+    /* Themed pills */
+    .nav-pills .nav-link {
+      border-radius: 12px;
+      font-weight: 600;
+      color: var(--guider-blue-dark);
+      background: #eef2ff;
+      border: 1px solid #e2e8f0;
+      transition: all .2s ease;
+    }
+    .nav-pills .nav-link:hover { background: var(--guider-blue-soft); }
+    .nav-pills .nav-link.active {
+      background: linear-gradient(135deg, var(--guider-blue-dark), var(--guider-blue));
+      color: #fff;
+      box-shadow: 0 6px 18px rgba(30,64,175,.25);
+      border-color: transparent;
+    }
     .navbar {
       background: linear-gradient(135deg, var(--guider-blue-dark), var(--guider-blue)) !important;
       box-shadow: 0 4px 20px rgba(30, 64, 175, 0.3);
@@ -99,7 +133,7 @@ $conn->close();
       display: flex;
       background: var(--card-white);
       border-radius: 16px;
-      box-shadow: 0 4px 16px rgba(0,0,0,0.06);
+      box-shadow: 0 6px 18px rgba(30,64,175,0.08);
       margin-bottom: 1.5rem;
       overflow: hidden;
       transition: all 0.3s ease;
@@ -140,6 +174,7 @@ $conn->close();
       color: var(--guider-blue-dark);
       margin: 0;
     }
+    .badge { border-radius: 12px; padding: .4rem .6rem; font-weight: 600; }
     .history-status {
       padding: 0.25rem 0.75rem;
       border-radius: 20px;
@@ -459,118 +494,232 @@ $conn->close();
       </div>
     </nav>
   </header>
+<?php include_once '../shared/suspension_banner.php'; ?>
 
   <!-- Main Content -->
   <main class="main-content">
     <div class="container">
-      <!-- Page Header -->
-      <div class="page-header">
-        <h1 class="page-title">
-          <i class="fas fa-history me-3"></i>Booking History
-        </h1>
-        <p class="page-subtitle">Your completed hiking adventures</p>
-      </div>
+      <!-- Tabs: Appeals | Bookings -->
+      <ul class="nav nav-pills mb-4" role="tablist">
+        <li class="nav-item" role="presentation">
+          <a href="?tab=appeals" class="nav-link <?php echo $activeTab === 'appeals' ? 'active' : ''; ?>">
+            <i class="fas fa-flag me-2"></i>Appeals
+          </a>
+        </li>
+        <li class="nav-item" role="presentation">
+          <a href="?tab=bookings" class="nav-link <?php echo $activeTab === 'bookings' ? 'active' : ''; ?>">
+            <i class="fas fa-history me-2"></i>Bookings
+          </a>
+        </li>
+      </ul>
+      <?php if ($activeTab === 'appeals'): ?>
+        <!-- Appeal History -->
+        <div class="page-header">
+          <h2 class="page-title">
+            <i class="fas fa-flag me-3"></i>Appeal History
+          </h2>
+          <p class="page-subtitle">All processed appeals for your bookings</p>
+        </div>
 
-    <?php if (empty($bookings)): ?>
-      <div class="empty-state">
-        <i class="fas fa-mountain"></i>
-        <h3>No Completed Bookings Yet</h3>
-        <p>Your completed hiking adventures will appear here once you finish your trips.</p>
-        <a href="HBooking.php" class="btn-history btn-rate mt-3">
-          <i class="fas fa-calendar-plus me-2"></i>Book Your First Adventure
-        </a>
-      </div>
-    <?php else: ?>
-      <div class="row">
-        <?php foreach ($bookings as $booking): ?>
-          <div class="col-12">
-            <div class="history-card">
-              <div class="history-image">
-                <img src="<?php echo htmlspecialchars(strpos($booking['mountainPicture'], 'http') === 0 ? $booking['mountainPicture'] : '../' . $booking['mountainPicture']); ?>" 
-                     alt="<?php echo htmlspecialchars($booking['mountainName']); ?>"
-                     onerror="this.src='../img/mountain-default.jpg'">
-              </div>
-              <div class="history-content">
-                <div class="history-header">
-                  <div>
-                    <h3 class="history-title"><?php echo htmlspecialchars($booking['mountainName']); ?></h3>
-                    <div class="guider-info">
-                      <div class="guider-avatar">
-                        <?php if (!empty($booking['guiderPicture'])): ?>
-                          <img src="<?php echo htmlspecialchars(strpos($booking['guiderPicture'], 'http') === 0 ? $booking['guiderPicture'] : '../' . $booking['guiderPicture']); ?>" 
-                               alt="<?php echo htmlspecialchars($booking['guiderName']); ?>"
-                               onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
-                        <?php endif; ?>
-                        <div style="display: <?php echo empty($booking['guiderPicture']) ? 'flex' : 'none'; ?>; align-items: center; justify-content: center; width: 100%; height: 100%; background: var(--guider-blue-soft); color: var(--guider-blue);">
-                          <i class="fas fa-user"></i>
+        <?php if (empty($appealHistory)): ?>
+          <div class="empty-state">
+            <i class="fas fa-inbox"></i>
+            <h3>No Appeal History</h3>
+            <p>Processed appeals (cancelled, refunded, resolved or rejected) will appear here.</p>
+          </div>
+        <?php else: ?>
+          <div class="row mb-4">
+            <?php foreach ($appealHistory as $appeal): ?>
+              <div class="col-12 mb-3">
+                <div class="history-card">
+                  <div class="history-image">
+                  <?php 
+                    $imgA = $appeal['mountainPicture'] ?? '';
+                    $imgA = str_replace('\\', '/', $imgA);
+                    if ($imgA === '' || $imgA === null) {
+                      $mountainSrcA = '../img/mountain-default.jpg';
+                    } elseif (strpos($imgA, 'http') === 0) {
+                      $mountainSrcA = $imgA;
+                    } elseif (strpos($imgA, '../') === 0) {
+                      $mountainSrcA = $imgA;
+                    } elseif (strpos($imgA, '/') === 0) {
+                      $mountainSrcA = '..' . $imgA; // absolute to site root
+                    } else {
+                      $mountainSrcA = '../' . $imgA; // relative path
+                    }
+                  ?>
+                  <img src="<?php echo htmlspecialchars($mountainSrcA); ?>" alt="<?php echo htmlspecialchars($appeal['mountainName']); ?>" onerror="this.src='../img/mountain-default.jpg'">
+                </div>
+                  <div class="history-content">
+                    <div class="history-header">
+                      <div>
+                        <h3 class="history-title"><?php echo htmlspecialchars($appeal['mountainName']); ?></h3>
+                        <div class="guider-info">
+                          <div class="guider-avatar"><i class="fas fa-user"></i></div>
+                          <span class="guider-name">Guider: <?php echo htmlspecialchars($appeal['guiderName']); ?></span>
                         </div>
+                        <small class="text-muted">Appeal #<?php echo $appeal['appealID']; ?> • Updated <?php echo date('d M Y, h:i A', strtotime($appeal['updatedAt'] ?? $appeal['createdAt'])); ?></small>
                       </div>
-                      <span class="guider-name"><?php echo htmlspecialchars($booking['guiderName']); ?></span>
+                      <?php 
+                        $status = $appeal['status'];
+                        $badge = 'bg-secondary';
+                        if ($status === 'refunded') $badge = 'bg-warning text-dark';
+                        if ($status === 'resolved') $badge = 'bg-secondary';
+                        if ($status === 'rejected') $badge = 'bg-danger';
+                        if ($status === 'cancelled') $badge = 'bg-danger';
+                      ?>
+                      <span class="badge <?php echo $badge; ?>"><?php echo htmlspecialchars(ucfirst(str_replace('_',' ', $status))); ?></span>
                     </div>
-                  </div>
-                  <span class="history-status status-completed">
-                    <i class="fas fa-check-circle me-1"></i>Completed
-                  </span>
-                </div>
-
-                <div class="history-details">
-                  <div class="detail-item">
-                    <i class="fas fa-calendar"></i>
-                    <span><?php echo date('M j, Y', strtotime($booking['startDate'])); ?> - <?php echo date('M j, Y', strtotime($booking['endDate'])); ?></span>
-                  </div>
-                  <div class="detail-item">
-                    <i class="fas fa-users"></i>
-                    <span><?php echo $booking['totalHiker']; ?> person(s)</span>
-                  </div>
-                  <div class="detail-item">
-                    <i class="fas fa-map-marker-alt"></i>
-                    <span><?php echo htmlspecialchars($booking['location']); ?></span>
-                  </div>
-                  <div class="detail-item">
-                    <i class="fas fa-hashtag"></i>
-                    <span>Booking #<?php echo $booking['bookingID']; ?></span>
-                  </div>
-                </div>
-
-                <div class="history-footer">
-                  <div>
-                    <div class="history-price">RM <?php echo number_format($booking['price'], 2); ?></div>
-                    <?php if (!empty($booking['transactionType'])): ?>
-                      <div class="payment-info">
-                        <i class="fas fa-credit-card"></i>
-                        <span class="payment-type"><?php echo strtoupper($booking['transactionType']); ?></span>
-                        <span>Payment</span>
+                    <div class="history-details">
+                      <div class="detail-item"><i class="fas fa-calendar"></i>
+                        <span><?php echo date('d/m/Y', strtotime($appeal['startDate'])); ?> - <?php echo date('d/m/Y', strtotime($appeal['endDate'])); ?></span>
+                      </div>
+                      <div class="detail-item"><i class="fas fa-hashtag"></i>
+                        <span>Booking #<?php echo $appeal['bookingID']; ?></span>
+                      </div>
+                    </div>
+                    <?php if ($appeal['status'] === 'refunded'): ?>
+                      <div class="alert alert-warning py-2 mb-2"><i class="bi bi-currency-dollar me-1"></i>Refund will be processed within 3 working days.</div>
+                    <?php endif; ?>
+                    <?php if (!empty($appeal['reason'])): ?>
+                      <div class="history-footer" style="border-top:none;padding-top:0;">
+                        <div class="text-muted"><strong>Reason:</strong> <?php echo nl2br(htmlspecialchars($appeal['reason'])); ?></div>
                       </div>
                     <?php endif; ?>
                   </div>
-                   <div class="history-actions">
-                     <?php if (!empty($booking['existingRating'])): ?>
-                       <!-- Show stars if already reviewed -->
-                       <div class="rating-display">
-                         <div class="stars">
-                           <?php for ($i = 1; $i <= 5; $i++): ?>
-                             <i class="fas fa-star <?php echo $i <= $booking['existingRating'] ? 'text-warning' : 'text-muted'; ?>"></i>
-                           <?php endfor; ?>
+                </div>
+              </div>
+            <?php endforeach; ?>
+          </div>
+        <?php endif; ?>
+      <?php endif; ?>
+
+      <?php if ($activeTab === 'bookings'): ?>
+        <!-- Page Header -->
+        <div class="page-header">
+          <h1 class="page-title">
+            <i class="fas fa-history me-3"></i>Booking History
+          </h1>
+          <p class="page-subtitle">Your completed hiking adventures</p>
+        </div>
+
+        <?php if (empty($bookings)): ?>
+        <div class="empty-state">
+          <i class="fas fa-mountain"></i>
+          <h3>No Completed Bookings Yet</h3>
+          <p>Your completed hiking adventures will appear here once you finish your trips.</p>
+          <a href="HBooking.php" class="btn-history btn-rate mt-3">
+            <i class="fas fa-calendar-plus me-2"></i>Book Your First Adventure
+          </a>
+        </div>
+      <?php else: ?>
+        <div class="row">
+          <?php foreach ($bookings as $booking): ?>
+            <div class="col-12">
+              <div class="history-card">
+                <div class="history-image">
+                  <?php 
+                    $imgB = $booking['mountainPicture'] ?? '';
+                    $imgB = str_replace('\\', '/', $imgB);
+                    if ($imgB === '' || $imgB === null) {
+                      $mountainSrcB = '../img/mountain-default.jpg';
+                    } elseif (strpos($imgB, 'http') === 0) {
+                      $mountainSrcB = $imgB;
+                    } elseif (strpos($imgB, '../') === 0) {
+                      $mountainSrcB = $imgB;
+                    } elseif (strpos($imgB, '/') === 0) {
+                      $mountainSrcB = '..' . $imgB;
+                    } else {
+                      $mountainSrcB = '../' . $imgB;
+                    }
+                  ?>
+                  <img src="<?php echo htmlspecialchars($mountainSrcB); ?>" 
+                       alt="<?php echo htmlspecialchars($booking['mountainName']); ?>"
+                       onerror="this.src='../img/mountain-default.jpg'">
+                </div>
+                <div class="history-content">
+                  <div class="history-header">
+                    <div>
+                      <h3 class="history-title"><?php echo htmlspecialchars($booking['mountainName']); ?></h3>
+                      <div class="guider-info">
+                        <div class="guider-avatar">
+                          <?php if (!empty($booking['guiderPicture'])): ?>
+                            <img src="<?php echo htmlspecialchars(strpos($booking['guiderPicture'], 'http') === 0 ? $booking['guiderPicture'] : '../' . $booking['guiderPicture']); ?>" 
+                                 alt="<?php echo htmlspecialchars($booking['guiderName']); ?>"
+                                 onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                          <?php endif; ?>
+                          <div style="display: <?php echo empty($booking['guiderPicture']) ? 'flex' : 'none'; ?>; align-items: center; justify-content: center; width: 100%; height: 100%; background: var(--guider-blue-soft); color: var(--guider-blue);">
+                            <i class="fas fa-user"></i>
+                          </div>
+                        </div>
+                        <span class="guider-name"><?php echo htmlspecialchars($booking['guiderName']); ?></span>
+                      </div>
+                    </div>
+                    <span class="history-status status-completed">
+                      <i class="fas fa-check-circle me-1"></i>Completed
+                    </span>
+                  </div>
+
+                  <div class="history-details">
+                    <div class="detail-item">
+                      <i class="fas fa-calendar"></i>
+                      <span><?php echo date('M j, Y', strtotime($booking['startDate'])); ?> - <?php echo date('M j, Y', strtotime($booking['endDate'])); ?></span>
+                    </div>
+                    <div class="detail-item">
+                      <i class="fas fa-users"></i>
+                      <span><?php echo $booking['totalHiker']; ?> person(s)</span>
+                    </div>
+                    <div class="detail-item">
+                      <i class="fas fa-map-marker-alt"></i>
+                      <span><?php echo htmlspecialchars($booking['location']); ?></span>
+                    </div>
+                    <div class="detail-item">
+                      <i class="fas fa-hashtag"></i>
+                      <span>Booking #<?php echo $booking['bookingID']; ?></span>
+                    </div>
+                  </div>
+
+                  <div class="history-footer">
+                    <div>
+                      <div class="history-price">RM <?php echo number_format($booking['price'], 2); ?></div>
+                      <?php if (!empty($booking['transactionType'])): ?>
+                        <div class="payment-info">
+                          <i class="fas fa-credit-card"></i>
+                          <span class="payment-type"><?php echo strtoupper($booking['transactionType']); ?></span>
+                          <span>Payment</span>
+                        </div>
+                      <?php endif; ?>
+                    </div>
+                     <div class="history-actions">
+                       <?php if (!empty($booking['existingRating'])): ?>
+                         <!-- Show stars if already reviewed -->
+                         <div class="rating-display">
+                           <div class="stars">
+                             <?php for ($i = 1; $i <= 5; $i++): ?>
+                               <i class="fas fa-star <?php echo $i <= $booking['existingRating'] ? 'text-warning' : 'text-muted'; ?>"></i>
+                             <?php endfor; ?>
+                           </div>
+                           <small class="text-muted">Reviewed</small>
                          </div>
-                         <small class="text-muted">Reviewed</small>
-                       </div>
-                     <?php else: ?>
-                       <!-- Show rate button if not reviewed -->
-                       <a href="HRateReview.php" class="btn-history btn-rate">
-                         <i class="fas fa-star me-1"></i>Rate & Review
-                       </a>
-                     <?php endif; ?>
-                     <button class="btn-history btn-view" onclick="viewBookingDetails(<?php echo $booking['bookingID']; ?>, '<?php echo addslashes($booking['mountainName']); ?>', '<?php echo addslashes($booking['guiderName']); ?>', '<?php echo $booking['startDate']; ?>', '<?php echo $booking['endDate']; ?>', '<?php echo $booking['totalHiker']; ?>', '<?php echo addslashes($booking['location']); ?>', '<?php echo number_format($booking['price'], 2); ?>', '<?php echo $booking['transactionType'] ?? 'N/A'; ?>', '<?php echo $booking['existingRating'] ?? ''; ?>', '<?php echo addslashes($booking['existingComment'] ?? ''); ?>')">
-                       <i class="fas fa-eye me-1"></i>View Details
-                     </button>
-                   </div>
+                       <?php else: ?>
+                         <!-- Show rate button if not reviewed -->
+                         <a href="HRateReview.php" class="btn-history btn-rate">
+                           <i class="fas fa-star me-1"></i>Rate & Review
+                         </a>
+                       <?php endif; ?>
+                       <button class="btn-history btn-view" onclick="viewBookingDetails(<?php echo $booking['bookingID']; ?>, '<?php echo addslashes($booking['mountainName']); ?>', '<?php echo addslashes($booking['guiderName']); ?>', '<?php echo $booking['startDate']; ?>', '<?php echo $booking['endDate']; ?>', '<?php echo $booking['totalHiker']; ?>', '<?php echo addslashes($booking['location']); ?>', '<?php echo number_format($booking['price'], 2); ?>', '<?php echo $booking['transactionType'] ?? 'N/A'; ?>', '<?php echo $booking['existingRating'] ?? ''; ?>', '<?php echo addslashes($booking['existingComment'] ?? ''); ?>')">
+                         <i class="fas fa-eye me-1"></i>View Details
+                       </button>
+                     </div>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
         <?php endforeach; ?>
-      </div>
-    <?php endif; ?>
+        </div>
+      <?php endif; ?>
+      <?php endif; ?>
 
   </main>
 
@@ -745,3 +894,4 @@ $conn->close();
   </script>
 </body>
 </html>
+

@@ -518,6 +518,9 @@
                 notificationSystem.error('Login Failed!', 'Invalid password. Please try again.');
             } else if (error === 'user_not_found') {
                 notificationSystem.error('Login Failed!', 'No user found with this email.');
+            } else if (error === 'banned_account') {
+                // 30-second sliding notification for banned account
+                notificationSystem.error('Account Banned', 'Your account has been banned. Please contact support if you believe this is a mistake.', 30000);
             }
             
             if (success === 'login') {

@@ -102,7 +102,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['submit_rating'])) {
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Rate and Review – Hiking Guidance System</title>
+  <title>Rate and Review - Hiking Guidance System</title>
   <!-- Bootstrap & FontAwesome -->
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
   <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
@@ -586,6 +586,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['submit_rating'])) {
       </div>
     </nav>
   </header>
+<?php include_once '../shared/suspension_banner.php'; ?>
   <!-- Rate and Review Section -->
   <main class="py-5">
     <div class="main-container">
@@ -662,7 +663,22 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['submit_rating'])) {
             <!-- Card Header -->
             <div class="card-header">
               <div class="mountain-info">
-                <img src="<?php echo htmlspecialchars(strpos($booking['mountainPicture'], 'http') === 0 ? $booking['mountainPicture'] : '../' . $booking['mountainPicture']); ?>" 
+                <?php 
+                  $raw = $booking['mountainPicture'] ?? '';
+                  $raw = str_replace('\\', '/', $raw);
+                  if ($raw === '' || $raw === null) {
+                    $mpic = 'https://via.placeholder.com/80';
+                  } elseif (strpos($raw, 'http') === 0) {
+                    $mpic = $raw;
+                  } elseif (strpos($raw, '../') === 0) {
+                    $mpic = $raw;
+                  } elseif (strpos($raw, '/') === 0) {
+                    $mpic = '..' . $raw;
+                  } else {
+                    $mpic = '../' . $raw;
+                  }
+                ?>
+                <img src="<?php echo htmlspecialchars($mpic); ?>" 
                      alt="<?php echo htmlspecialchars($booking['mountainName']); ?>" 
                      class="mountain-image">
                 <div class="mountain-details">
@@ -746,11 +762,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['submit_rating'])) {
                     
                     <!-- Star Rating -->
                     <div class="star-rating" data-booking="<?php echo $booking['bookingID']; ?>">
-                      <span class="star" data-rating="1">★</span>
-                      <span class="star" data-rating="2">★</span>
-                      <span class="star" data-rating="3">★</span>
-                      <span class="star" data-rating="4">★</span>
-                      <span class="star" data-rating="5">★</span>
+                      <span class="star" data-rating="1">&#9733;</span>
+                      <span class="star" data-rating="2">&#9733;</span>
+                      <span class="star" data-rating="3">&#9733;</span>
+                      <span class="star" data-rating="4">&#9733;</span>
+                      <span class="star" data-rating="5">&#9733;</span>
                     </div>
                     <input type="hidden" name="rating" id="rating_<?php echo $booking['bookingID']; ?>" value="0" required>
                     
@@ -872,7 +888,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['submit_rating'])) {
       ratingContainer.innerHTML = '';
       for (let i = 1; i <= 5; i++) {
         const star = document.createElement('span');
-        star.innerHTML = '★';
+        star.innerHTML = '&#9733;';
         star.style.fontSize = '1.5rem';
         star.style.color = i <= rating ? 'var(--accent)' : '#e5e7eb';
         star.style.marginRight = '0.25rem';

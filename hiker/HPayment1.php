@@ -19,7 +19,7 @@ if (!$bookingID) {
 include '../shared/db_connection.php';
 
 // Fetch specific booking details
-$bookingQuery = "SELECT b.*, g.username as guiderName, g.price as guiderPrice, m.name, m.picture
+$bookingQuery = "SELECT b.*, g.username as guiderName, g.price as guiderPrice, m.name, m.picture, m.latitude, m.longitude
                  FROM booking b 
                  JOIN guider g ON b.guiderID = g.guiderID 
                  JOIN mountain m ON b.mountainID = m.mountainID 
@@ -36,7 +36,22 @@ if (!$booking) {
     exit;
 }
 
-
+// Guard: if booking is pending but expired, auto-cancel and redirect back
+if (!empty($booking)) {
+    // Query already ensures status='pending'
+    $isExpired = (strtotime($booking['endDate'] . ' 23:59:59') < time());
+    if ($isExpired) {
+        if ($upd = $conn->prepare("UPDATE booking SET status = 'cancelled', updatedAt = NOW() WHERE bookingID = ? AND status = 'pending'")) {
+            $upd->bind_param('i', $bookingID);
+            $upd->execute();
+            $upd->close();
+        }
+        // Close connection before redirect
+        $conn->close();
+        header("Location: HPayment.php?info=expired_cancelled=1");
+        exit;
+    }
+}
 
 $conn->close();
 ?>
@@ -46,7 +61,7 @@ $conn->close();
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Payment Checkout – Hiking Guidance System</title>
+  <title>Payment Checkout - Hiking Guidance System</title>
   <!-- Bootstrap & FontAwesome -->
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
   <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
@@ -135,7 +150,7 @@ $conn->close();
       font-size: 1.5rem;
     }
 
-    /* Booking Summary Card */
+
     .booking-summary-card {
       background: #f0fdf4;
       border-radius: 15px;
@@ -215,7 +230,7 @@ $conn->close();
       font-size: 0.9rem;
     }
 
-    /* Payment Method Selection */
+    /* payment method selectionnn */
     .payment-methods-container {
       background: white;
       border-radius: 15px;
@@ -267,7 +282,7 @@ $conn->close();
       font-size: 0.9rem;
     }
 
-    /* Payment Buttons */
+    /* payment buttons */
     .payment-actions {
       display: flex;
       gap: 1rem;
@@ -313,7 +328,7 @@ $conn->close();
       color: var(--guider-blue-dark);
     }
 
-    /* Custom Notification System */
+    /* custom notif*/
     .notification-container {
       position: fixed;
       bottom: 20px;
@@ -431,6 +446,25 @@ $conn->close();
       color: #374151;
     }
 
+    /* GMap punya styling */
+      .mountain-image-container {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 10px;
+      }
+      .mini-map {
+        width: 220px;
+        height: 140px;
+        border-radius: 12px;
+        overflow: hidden;
+        border: 2px solid #10b981;
+        box-shadow: 0 8px 20px rgba(16, 185, 129, 0.2);
+      }
+      @media (max-width: 768px) {
+        .mini-map { width: 100%; height: 160px; }
+      }
+
     /* Mobile Responsive */
     @media (max-width: 768px) {
       .section-title {
@@ -504,6 +538,7 @@ $conn->close();
       </div>
     </nav>
   </header>
+<?php include_once '../shared/suspension_banner.php'; ?>
 
   <!-- Main Content -->
   <main class="main-content">
@@ -535,9 +570,34 @@ $conn->close();
         
         <div class="booking-summary-content">
           <div class="mountain-image-container" style="display: flex; justify-content: center; align-items: center;">
-            <img src="<?php echo htmlspecialchars(strpos($booking['picture'], 'http') === 0 ? $booking['picture'] : '../' . $booking['picture']); ?>" 
+            <?php 
+              $raw = $booking['picture'] ?? '';
+              $raw = str_replace('\\', '/', $raw);
+              if ($raw === '' || $raw === null) {
+                $pic = 'https://via.placeholder.com/100';
+              } elseif (strpos($raw, 'http') === 0) {
+                $pic = $raw;
+              } elseif (strpos($raw, '../') === 0) {
+                $pic = $raw;
+              } elseif (strpos($raw, '/') === 0) {
+                $pic = '..' . $raw;
+              } else {
+                $pic = '../' . $raw;
+              }
+            ?>
+            <img src="<?php echo htmlspecialchars($pic); ?>" 
                  alt="<?php echo htmlspecialchars($booking['name']); ?>" 
                  class="mountain-image">
+
+            <?php 
+                $lat = isset($booking['latitude']) ? (float)$booking['latitude'] : null; 
+                $lng = isset($booking['longitude']) ? (float)$booking['longitude'] : null; 
+            ?>
+            <div class="map-placeholder mini-map"
+                data-latitude="<?php echo htmlspecialchars($lat ?? ''); ?>"
+                data-longitude="<?php echo htmlspecialchars($lng ?? ''); ?>">
+            </div>
+
           </div>
           
           <div class="booking-details">
@@ -707,5 +767,37 @@ $conn->close();
     }
   </script>
 
+  <script>
+    function renderRowMaps(){
+      if(!(window.google && google.maps)) return;
+      document.querySelectorAll('.map-placeholder').forEach(function(el){
+        const lat = parseFloat(el.getAttribute('data-latitude'));
+        const lng = parseFloat(el.getAttribute('data-longitude'));
+        if (isNaN(lat) || isNaN(lng)) {
+          el.textContent = 'No coordinates';
+          el.style.display = 'flex';
+          el.style.alignItems = 'center';
+          el.style.justifyContent = 'center';
+          return;
+        }
+        const m = new google.maps.Map(el, {
+          center: { lat, lng },
+          zoom: 10,
+          disableDefaultUI: true,
+          gestureHandling: 'none'
+        });
+        new google.maps.Marker({ position: { lat, lng }, map: m });
+        el.style.cursor = 'pointer';
+        el.title = 'Open in Google Maps';
+        el.addEventListener('click', function(){
+          window.open(`https://www.google.com/maps?q=${lat},${lng}`, '_blank', 'noopener');
+        });
+      });
+    }
+    window.initMap = function(){ try { renderRowMaps(); } catch(e) { console.error(e); } };
+  </script>
+  <script async src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBQBKen6oHNUxX1Mg6lL5rZMVy_LReklqY&loading=async&callback=initMap"></script>
+
 </body>
 </html>
+

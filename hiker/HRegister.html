@@ -623,6 +623,12 @@
             window.history.replaceState({}, document.title, window.location.pathname);
         }
         
+        if (urlParams.get('error') === 'password_mismatch') {
+            notificationSystem.error('Validation Error!', 'Passwords do not match. Please try again.');
+            // Clean URL
+            window.history.replaceState({}, document.title, window.location.pathname);
+        }
+        
         if (urlParams.get('success') === 'registration') {
             notificationSystem.success('Account Created!', 'Your account has been successfully created. You can now sign in.');
             // Clean URL

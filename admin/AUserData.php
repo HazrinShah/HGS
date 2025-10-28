@@ -10,6 +10,7 @@ try {
     // Get filter parameters
     $user_type = isset($_GET['user_type']) ? $_GET['user_type'] : '';
     $search_term = isset($_GET['search']) ? $_GET['search'] : '';
+    $status = isset($_GET['status']) ? strtolower(trim($_GET['status'])) : '';
     
     // Build the query based on filters
     $where_conditions = [];
@@ -31,6 +32,13 @@ try {
         $params[] = $search_param;
         $param_types .= 'ss';
     }
+
+    // Status filter: if explicitly requesting pending, include only pending; else exclude pending by default
+    if ($status === 'pending') {
+        $where_conditions[] = "u.account_status = 'pending'";
+    } else {
+        $where_conditions[] = "u.account_status <> 'pending'";
+    }
     
     // Build the main query
     $query = "
@@ -48,6 +56,10 @@ try {
                 WHEN u.user_type = 'guider' THEN g.total_reviews
                 ELSE NULL
             END as total_reviews,
+            CASE 
+                WHEN u.user_type = 'guider' THEN g.certificate
+                ELSE NULL
+            END as certificate,
             CASE 
                 WHEN u.account_status = 'suspended' THEN 'Suspended'
                 WHEN u.account_status = 'banned' THEN 'Banned'

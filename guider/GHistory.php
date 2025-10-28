@@ -1,4 +1,4 @@
-<?php
+﻿<?php
 session_start();
 if (!isset($_SESSION['guiderID'])) {
     header("Location: GLogin.html");
@@ -410,6 +410,8 @@ if ($guiderID) {
 </header>
 <!-- End Header -->
 
+<?php include_once '../shared/suspension_banner.php'; ?>
+
     <div class="main-container">
 
         <!-- Page Header -->
@@ -540,3 +542,4 @@ if ($guiderID) {
     </script>
 </body>
 </html>
+

@@ -12,32 +12,29 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
     if ($result && $result->num_rows == 1) {
         $user = $result->fetch_assoc();
+        $status = strtolower($user['status'] ?? 'active');
+
+        // Block banned accounts
+        if ($status === 'banned') {
+            header("Location: GLogin.html?error=banned_account");
+            exit();
+        }
 
         // Verify password (plain text comparison here)
         if ($user['password'] === $password) {
-            // Successful login: set session and show alert then redirect
+            // Successful login: set session and redirect
             $_SESSION['guiderID'] = $user['guiderID'];      
             $_SESSION['username'] = $user['username'];
+            $_SESSION['guider_status'] = $status; // 'suspended' or 'active'
 
-            echo "<script>
-                alert('Login successful! Welcome, " . addslashes($user['username']) . "');
-                window.location.href = 'GBooking.php';
-            </script>";
+            header("Location: GBooking.php");
             exit();
         } else {
-            // Wrong password alert and go back
-            echo "<script>
-                alert('Incorrect password. Please try again.');
-                window.history.back();
-            </script>";
+            header("Location: GLogin.html?error=invalid_password");
             exit();
         }
     } else {
-        // Email not found alert and go back
-        echo "<script>
-            alert('Email not found. Please register first.');
-            window.history.back();
-        </script>";
+        header("Location: GLogin.html?error=user_not_found");
         exit();
     }
 } else {

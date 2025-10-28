@@ -524,6 +524,11 @@ $guiderID = $_SESSION['guiderID'];
             notificationSystem.error('Login Failed!', 'No user found with this email.');
         }
         
+        if (urlParams.get('error') === 'banned_account') {
+            // 30-second sliding notification for banned account
+            notificationSystem.error('Account Banned', 'Your account has been banned. Please contact support if you believe this is a mistake.', 30000);
+        }
+
         if (urlParams.get('success') === 'login') {
             notificationSystem.success('Welcome!', 'Login successful!');
         }

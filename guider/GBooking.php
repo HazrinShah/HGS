@@ -1,4 +1,4 @@
-<?php
+﻿<?php
 session_start();
 if (!isset($_SESSION['guiderID'])) {
     header("Location: GLogin.html");
@@ -1174,10 +1174,12 @@ if (isset($_SESSION['offday_booking_conflict']) && $_SESSION['offday_booking_con
 </header>
 <!-- End Header -->
 
+<?php include_once '../shared/suspension_banner.php'; ?>
+
 
 <div class="main-container">
 
-  <!-- 🔷 Tabs -->
+  <!-- ðŸ”· Tabs -->
   <ul class="nav nav-tabs">
     <li class="nav-item">
       <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#booking">Booking Management</button>
@@ -1190,7 +1192,7 @@ if (isset($_SESSION['offday_booking_conflict']) && $_SESSION['offday_booking_con
     </li>
   </ul>
 
-  <!-- 🔽 Tab Content -->
+  <!-- ðŸ”½ Tab Content -->
   <div class="tab-content mt-2">
 
    <!-- Booking Management -->
@@ -1377,7 +1379,7 @@ if (isset($_SESSION['offday_booking_conflict']) && $_SESSION['offday_booking_con
                         <ul class="list-group list-group-flush">
                             <?php foreach ($offDates as $row): ?>
                             <li class="list-group-item d-flex justify-content-between align-items-center">
-                                📅 <?= date("l, d F Y", strtotime($row['offDate'])) ?>
+                                <?= date("l, d F Y", strtotime($row['offDate'])) ?>
 
                                 <!-- Delete Form -->
                                 <form method="POST" action="GBooking.php" style="margin: 0;">
