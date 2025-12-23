@@ -18,7 +18,7 @@ CORS(app)  # Allow PHP to call this API
 
 # Configuration - Use environment variable for API key (safer!)
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', 'your-api-key-here')
-GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent"
 
 
 def analyze_sentiment_with_gemini(review_text):
