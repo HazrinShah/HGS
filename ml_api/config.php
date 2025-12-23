@@ -98,11 +98,18 @@ function analyzeGuiderReviews($reviews) {
 function checkMLAPIHealth() {
     $ch = curl_init(ML_API_BASE_URL . '/health');
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($ch, CURLOPT_TIMEOUT, 3);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 60); // Increased for Render cold starts
+    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 30);
     
     $response = curl_exec($ch);
     $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $error = curl_error($ch);
     curl_close($ch);
+    
+    // Log for debugging
+    if ($error) {
+        error_log("ML API Health Check Error: " . $error);
+    }
     
     return $httpCode === 200;
 }
