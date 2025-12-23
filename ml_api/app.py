@@ -114,8 +114,10 @@ def health_check():
     return jsonify({
         "status": "healthy",
         "service": "HGS ML API",
-        "version": "1.0",
-        "features": ["sentiment_analysis"]
+        "version": "1.1",
+        "features": ["sentiment_analysis"],
+        "model": GEMINI_API_URL.split("/")[-1].replace(":generateContent", ""),
+        "api_key_set": bool(GEMINI_API_KEY and GEMINI_API_KEY != 'your-api-key-here')
     })
 
 
