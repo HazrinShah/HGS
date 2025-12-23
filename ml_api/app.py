@@ -111,13 +111,19 @@ Themes can be: safety, knowledge, friendliness, communication, punctuality, equi
 @app.route('/api/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
+    # Show first 10 and last 4 chars of API key for debugging
+    key_preview = "Not set"
+    if GEMINI_API_KEY and GEMINI_API_KEY != 'your-api-key-here':
+        key_preview = GEMINI_API_KEY[:10] + "..." + GEMINI_API_KEY[-4:]
+    
     return jsonify({
         "status": "healthy",
         "service": "HGS ML API",
-        "version": "1.1",
+        "version": "1.2",
         "features": ["sentiment_analysis"],
         "model": GEMINI_API_URL.split("/")[-1].replace(":generateContent", ""),
-        "api_key_set": bool(GEMINI_API_KEY and GEMINI_API_KEY != 'your-api-key-here')
+        "api_key_set": bool(GEMINI_API_KEY and GEMINI_API_KEY != 'your-api-key-here'),
+        "api_key_preview": key_preview
     })
 
 
