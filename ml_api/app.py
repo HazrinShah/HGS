@@ -299,8 +299,6 @@ def analyze_guider_reviews():
 
 
 if __name__ == '__main__':
-    import os
-    
     print("=" * 60)
     print("🚀 HGS ML API Server Starting...")
     print("=" * 60)
@@ -309,13 +307,8 @@ if __name__ == '__main__':
     print("  - POST /api/analyze-sentiment")
     print("  - POST /api/analyze-guider-reviews")
     print("=" * 60)
-    
-    # Use PORT from environment (for Render/Railway) or default to 5000 (local)
-    port = int(os.environ.get('PORT', 5000))
-    debug_mode = os.environ.get('FLASK_ENV') != 'production'
-    
-    print(f"✅ Server running on http://0.0.0.0:{port}")
+    print("✅ Server running on http://127.0.0.1:5000")
     print("=" * 60)
     
-    app.run(debug=debug_mode, host='0.0.0.0', port=port)
+    app.run(debug=True, host='127.0.0.1', port=5000)
 

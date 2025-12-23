@@ -7,8 +7,9 @@
  */
 
 // ML API Configuration
-define('ML_API_BASE_URL', 'http://127.0.0.1:5000/api');
-define('ML_API_TIMEOUT', 60); // seconds (increased for batch processing)
+// Use Render URL for production, localhost for local development
+define('ML_API_BASE_URL', 'https://hgs-ml-api.onrender.com/api');
+define('ML_API_TIMEOUT', 90); // seconds (increased for Render cold starts)
 
 /**
  * Call ML API endpoint
