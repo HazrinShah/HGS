@@ -1,11 +1,11 @@
 <?php
 // file ni untuk delete booking auto kalau tak buat payment dalam 5 jam
-// This should be run via cron job every hour or so
+// ni kena run via cron job setiap jam
 
-// Database connection
+// connect database
 include 'db_connection.php';
 
-// Function to send booking expired email notification
+// function untuk hantar booking expired email notification
 function sendBookingExpiredEmail($bookingData) {
     $to = $bookingData['email'];
     $username = $bookingData['username'];
@@ -136,7 +136,7 @@ try {
     // tuko je kat sini kalau nak tukar masa dia
     $fiveHoursAgo = date('Y-m-d H:i:s', strtotime('-5 hours'));
     
-    // Find bookings that are older than 5 hours and still pending with user details
+    // cari bookings yang lebih lama dari 5 jam dan masih pending dengan user details
     $query = "SELECT b.bookingID, b.hikerID, b.startDate, b.endDate, b.price, b.totalHiker,
                      h.username, h.email,
                      g.username as guiderName,
@@ -154,10 +154,10 @@ try {
     $deletedCount = 0;
     
     while ($row = $result->fetch_assoc()) {
-        // Send email notification before deletion
+        // hantar email notification sebelum delete
         $emailSent = sendBookingExpiredEmail($row);
         
-        // Delete the booking
+        // delete booking tu
         $deleteQuery = "DELETE FROM booking WHERE bookingID = ?";
         $deleteStmt = $conn->prepare($deleteQuery);
         $deleteStmt->bind_param("i", $row['bookingID']);

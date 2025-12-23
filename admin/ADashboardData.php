@@ -1,9 +1,6 @@
 <?php
 require_once '../shared/db_connection.php';
 
-// For now, skip session validation to test the dashboard
-// TODO: Add proper admin session validation later
-
 try {
     $data = [];
 

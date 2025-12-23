@@ -2,7 +2,7 @@
 session_start();
 header('Content-Type: application/json');
 
-// Check if user is logged in
+// check user dah login ke tak
 if (!isset($_SESSION['hikerID'])) {
     http_response_code(401);
     echo json_encode(['success' => false, 'message' => 'Unauthorized']);
@@ -11,7 +11,7 @@ if (!isset($_SESSION['hikerID'])) {
 
 $hikerID = (int)$_SESSION['hikerID'];
 
-// Check if bookingID is provided
+// check bookingID ada ke tak
 if (!isset($_POST['bookingID']) || empty($_POST['bookingID'])) {
     http_response_code(400);
     echo json_encode(['success' => false, 'message' => 'Booking ID is required']);
@@ -20,11 +20,11 @@ if (!isset($_POST['bookingID']) || empty($_POST['bookingID'])) {
 
 $bookingID = (int)$_POST['bookingID'];
 
-// Database connection
+// connect database
 include '../shared/db_connection.php';
 
 try {
-    // Fetch booking info
+    // ambil booking info
     $bq = $conn->prepare("SELECT bookingID, hikerID, groupType, status, totalHiker FROM booking WHERE bookingID = ? LIMIT 1");
     $bq->bind_param('i', $bookingID);
     $bq->execute();
@@ -44,9 +44,9 @@ try {
     }
 
     if ($booking['groupType'] === 'open') {
-        // Open group: user cancels their participation only
-        // Confirm the user has a participant row
-        $qp = $conn->prepare("SELECT qty FROM bookingParticipant WHERE bookingID = ? AND hikerID = ? LIMIT 1");
+        // open group: user cancel participation dia je
+        // confirm user ada participant row
+        $qp = $conn->prepare("SELECT qty FROM bookingparticipant WHERE bookingID = ? AND hikerID = ? LIMIT 1");
         $qp->bind_param('ii', $bookingID, $hikerID);
         $qp->execute();
         $prow = $qp->get_result()->fetch_assoc();
@@ -63,22 +63,22 @@ try {
 
         $conn->begin_transaction();
         try {
-            // Remove participant row
-            $delP = $conn->prepare("DELETE FROM bookingParticipant WHERE bookingID = ? AND hikerID = ?");
+            // buang participant row
+            $delP = $conn->prepare("DELETE FROM bookingparticipant WHERE bookingID = ? AND hikerID = ?");
             $delP->bind_param('ii', $bookingID, $hikerID);
             $delP->execute();
             $delP->close();
 
             if ($qty > 0) {
-                // Decrement group totalHiker safely
+                // decrement group totalHiker dengan selamat
                 $updB = $conn->prepare("UPDATE booking SET totalHiker = GREATEST(0, totalHiker - ?) WHERE bookingID = ?");
                 $updB->bind_param('ii', $qty, $bookingID);
                 $updB->execute();
                 $updB->close();
             }
 
-            // If no participants remain, delete the booking
-            $chk = $conn->prepare("SELECT COALESCE(SUM(qty),0) AS sumQty FROM bookingParticipant WHERE bookingID = ?");
+            // kalau takde participants tinggal, delete booking tu
+            $chk = $conn->prepare("SELECT COALESCE(SUM(qty),0) AS sumQty FROM bookingparticipant WHERE bookingID = ?");
             $chk->bind_param('i', $bookingID);
             $chk->execute();
             $sum = $chk->get_result()->fetch_assoc();
@@ -86,7 +86,7 @@ try {
             $sumQty = (int)($sum['sumQty'] ?? 0);
 
             if ($sumQty <= 0) {
-                // No participants -> delete the booking row entirely (regardless of owner)
+                // takde participants -> delete booking row terus (tak kira owner)
                 $delB = $conn->prepare("DELETE FROM booking WHERE bookingID = ? AND status = 'pending'");
                 $delB->bind_param('i', $bookingID);
                 $delB->execute();
@@ -103,7 +103,7 @@ try {
             exit;
         }
     } else {
-        // Close group: only owner can cancel their own pending booking
+        // close group: owner je boleh cancel pending booking sendiri
         if ((int)$booking['hikerID'] !== $hikerID) {
             http_response_code(403);
             echo json_encode(['success' => false, 'message' => 'You do not own this booking']);

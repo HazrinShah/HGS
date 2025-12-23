@@ -14,8 +14,8 @@ if (!isset($_SESSION['guiderID'])) {
 
 $guiderID = $_SESSION['guiderID'];
 
-// Fetch guider data from database
-$sql = "SELECT guiderID, username, email, phone_number, gender, profile_picture FROM guider WHERE guiderID = ?";
+// Fetch guider data from database (including skills, experience, about, mountains, no_acc for profile updates)
+$sql = "SELECT guiderID, username, email, phone_number, gender, profile_picture, skills, experience, about, mountains, no_acc FROM guider WHERE guiderID = ?";
 $stmt = $conn->prepare($sql);
 $stmt->bind_param("i", $guiderID);
 $stmt->execute();
@@ -26,6 +26,16 @@ if ($result->num_rows === 1) {
 } else {
     echo "Guider not found.";
     exit();
+}
+
+// Fetch all mountains for the mountain selection
+$mountainsQuery = "SELECT mountainID, name FROM mountain ORDER BY name";
+$mountainsResult = $conn->query($mountainsQuery);
+$allMountains = [];
+if ($mountainsResult && $mountainsResult->num_rows > 0) {
+    while ($row = $mountainsResult->fetch_assoc()) {
+        $allMountains[] = $row;
+    }
 }
 
 // Handle price update
@@ -46,12 +56,13 @@ if (isset($_POST['update_price'])) {
 // Handle profile update
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_profile'])) {
     $username = $_POST['username'];
-    $email = $_POST['email'];
     $phone = $_POST['phone_number'];
-    $gender = $_POST['gender'];
-    $skills = $_POST['skills'] ?? '';
-    $experience = $_POST['experience'] ?? '';
-    $about = $_POST['about'] ?? '';
+    $no_acc = $_POST['no_acc'] ?? $guider['no_acc'] ?? '';
+    // Keep existing values for skills, experience, about, and mountains (they are edited separately)
+    $skills = $_POST['skills'] ?? $guider['skills'] ?? '';
+    $experience = $_POST['experience'] ?? $guider['experience'] ?? '';
+    $about = $_POST['about'] ?? $guider['about'] ?? '';
+    $mountains = $_POST['mountains'] ?? $guider['mountains'] ?? '';
 
     // Set up upload directory (relative to the script location)
     $target_dir = "../uploads/";
@@ -85,10 +96,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_profile'])) {
         }
     }
 
-    // Update query
-    $sql = "UPDATE guider SET username=?, email=?, phone_number=?, gender=?, profile_picture=?, skills=?, experience=?, about=? WHERE guiderID=?";
+    // Update query - Only update username, phone_number, no_acc (email and gender are permanent)
+    $sql = "UPDATE guider SET username=?, phone_number=?, no_acc=?, profile_picture=?, skills=?, experience=?, about=?, mountains=? WHERE guiderID=?";
     $stmt = $conn->prepare($sql);
-    $stmt->bind_param("ssssssssi", $username, $email, $phone, $gender, $profile_picture_path, $skills, $experience, $about, $guiderID);
+    $stmt->bind_param("ssssssssi", $username, $phone, $no_acc, $profile_picture_path, $skills, $experience, $about, $mountains, $guiderID);
     
     if ($stmt->execute()) {
         // Refresh the guider data after update
@@ -716,6 +727,67 @@ $conn->close();
       box-shadow: 0 4px 15px rgba(30, 64, 175, 0.4);
     }
 
+    /* Mountain Tags */
+    .mountains-container {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      padding: 1rem;
+      background: linear-gradient(135deg, #f8fafc, #f1f5f9);
+      border-radius: 15px;
+      border: 1px solid #e2e8f0;
+    }
+
+    .mountain-tag {
+      background: linear-gradient(135deg, #ffffff, #f1f5f9);
+      color: var(--guider-blue-dark);
+      padding: 0.6rem 1.2rem;
+      border-radius: 25px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      border: 2px solid var(--guider-blue-soft);
+      cursor: pointer;
+      transition: all 0.3s ease;
+      white-space: nowrap;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .mountain-tag::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: -100%;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.4), transparent);
+      transition: left 0.5s ease;
+    }
+
+    .mountain-tag:hover {
+      background: linear-gradient(135deg, var(--guider-blue), var(--guider-blue-light));
+      color: white;
+      transform: translateY(-2px) scale(1.05);
+      box-shadow: 0 8px 20px rgba(30, 64, 175, 0.3);
+      border-color: var(--guider-blue);
+    }
+
+    .mountain-tag:hover::before {
+      left: 100%;
+    }
+
+    .mountain-tag.selected {
+      background: linear-gradient(135deg, var(--guider-blue), var(--guider-blue-light));
+      color: white;
+      border-color: var(--guider-blue);
+      box-shadow: 0 4px 15px rgba(30, 64, 175, 0.4);
+    }
+
+    .mountain-tag.selected::after {
+      content: ' ✓';
+    }
+
     .experience-options {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
@@ -881,7 +953,7 @@ $conn->close();
         <h1 class="navbar-title mx-auto">HIKING GUIDANCE SYSTEM</h1>
 
         <!-- logo (right) -->
-      <a class="navbar-brand" href="../index.html">
+      <a class="navbar-brand" href="../index.php">
           <img src="../img/logo.png" class="img-fluid logo" alt="HGS Logo">
         </a>
       </div>
@@ -976,13 +1048,13 @@ $conn->close();
               <span class="input-group-text">RM</span>
                       <input type="number" class="form-control" name="guider_price" 
                             value="<?php echo isset($guider['price']) ? $guider['price'] : '250'; ?>" 
-                            min="250" max="300" step="10" required>
+                            min="0" max="300" step="1" required>
             </div>
             <button class="btn btn-primary btn-sm" type="submit" name="update_price">
               <i class="bi bi-check-lg"></i>
                       </button>
                     </div>
-          <small class="text-muted">Min RM250/day</small>
+          <small class="text-muted">Min RM250/trip</small>
                   </form>
                 </div>
               </div>
@@ -1014,6 +1086,10 @@ $conn->close();
           <div class="col-md-6">
                 <label class="form-label">Gender:</label>
                 <input type="text" class="form-control" disabled value="<?php echo htmlspecialchars($guider['gender']); ?>">
+          </div>
+          <div class="col-md-6">
+                <label class="form-label">Bank Account Number:</label>
+                <input type="text" class="form-control" disabled value="<?php echo htmlspecialchars($guider['no_acc'] ?? 'Not specified'); ?>">
           </div>
         </div>
         <button type="button" class="edit-btn mt-3" data-bs-toggle="modal" data-bs-target="#editProfileModal">
@@ -1057,6 +1133,28 @@ $conn->close();
               <?php endforeach; ?>
         </div>
       </div>
+
+          <!-- Mountains Section -->
+          <div class="profile-section">
+            <h5 class="section-title">
+              <i class="fas fa-mountain"></i>Mountains Conquered
+            </h5>
+            <div class="mountains-container">
+              <?php 
+              $selectedMountains = !empty($guider['mountains']) ? explode(',', $guider['mountains']) : [];
+              if (!empty($allMountains)):
+                foreach ($allMountains as $mountain): ?>
+                  <span class="mountain-tag <?php echo in_array($mountain['name'], $selectedMountains) ? 'selected' : ''; ?>" 
+                        data-mountain="<?php echo htmlspecialchars($mountain['name']); ?>">
+                    <?php echo htmlspecialchars($mountain['name']); ?>
+                  </span>
+                <?php endforeach;
+              else: ?>
+                <p class="text-muted">No mountains available in the system.</p>
+              <?php endif; ?>
+            </div>
+            <small class="text-muted">Click on mountains you have climbed before</small>
+          </div>
 
           <!-- About Section -->
           <div class="profile-section">
@@ -1112,17 +1210,16 @@ $conn->close();
           <input type="text" class="form-control" name="username" value="<?php echo htmlspecialchars($guider['username']); ?>" required>
 
           <label class="form-label">Email:</label>
-          <input type="email" class="form-control" name="email" value="<?php echo htmlspecialchars($guider['email']); ?>" required>
+          <input type="email" class="form-control" value="<?php echo htmlspecialchars($guider['email']); ?>" disabled style="background-color: #e9ecef; cursor: not-allowed;">
 
           <label class="form-label">Phone:</label>
           <input type="text" class="form-control" name="phone_number" value="<?php echo htmlspecialchars($guider['phone_number']); ?>" required>
 
+          <label class="form-label">Bank Account Number:</label>
+          <input type="text" class="form-control" name="no_acc" value="<?php echo htmlspecialchars($guider['no_acc'] ?? ''); ?>" placeholder="Enter your bank account number" maxlength="16" minlength="10" pattern="[0-9]{1,16}" title="Bank account number">
+
           <label class="form-label">Gender:</label>
-          <select class="form-control" name="gender" required>
-            <option value="Male" <?php if ($guider['gender'] == "Male") echo "selected"; ?>>Male</option>
-            <option value="Female" <?php if ($guider['gender'] == "Female") echo "selected"; ?>>Female</option>
-            <option value="Other" <?php if ($guider['gender'] == "Other") echo "selected"; ?>>Other</option>
-          </select>
+          <input type="text" class="form-control" value="<?php echo htmlspecialchars($guider['gender'] ?? 'Not specified'); ?>" disabled style="background-color: #e9ecef; cursor: not-allowed;">
         </div> <!-- Correctly closes modal-body -->
 
         <div class="modal-footer">
@@ -1237,12 +1334,23 @@ $conn->close();
                 this.classList.add('selected');
             });
         });
+
+        // Mountain Selection
+        const mountainTags = document.querySelectorAll('.mountain-tag');
+        mountainTags.forEach(tag => {
+            tag.addEventListener('click', function() {
+                this.classList.toggle('selected');
+            });
+        });
     });
 
     // Save Profile Changes Function
     function saveProfileChanges() {
         const selectedSkills = Array.from(document.querySelectorAll('.skill-tag.selected'))
             .map(tag => tag.dataset.skill);
+        
+        const selectedMountains = Array.from(document.querySelectorAll('.mountain-tag.selected'))
+            .map(tag => tag.dataset.mountain);
         
         const selectedExperience = document.querySelector('.experience-option.selected')?.dataset.experience || '';
         const aboutText = document.querySelector('.about-textarea').value;
@@ -1253,11 +1361,13 @@ $conn->close();
         formData.append('username', '<?php echo htmlspecialchars($guider['username']); ?>');
         formData.append('email', '<?php echo htmlspecialchars($guider['email']); ?>');
         formData.append('phone_number', '<?php echo htmlspecialchars($guider['phone_number']); ?>');
+        formData.append('no_acc', '<?php echo htmlspecialchars($guider['no_acc'] ?? ''); ?>');
         formData.append('gender', '<?php echo htmlspecialchars($guider['gender']); ?>');
         formData.append('profile_picture', '<?php echo htmlspecialchars($guider['profile_picture']); ?>');
         formData.append('skills', selectedSkills.join(','));
         formData.append('experience', selectedExperience);
         formData.append('about', aboutText);
+        formData.append('mountains', selectedMountains.join(','));
 
         // Submit via fetch
         fetch('GProfile.php', {

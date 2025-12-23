@@ -663,7 +663,7 @@ $mountains = $result->fetch_all(MYSQLI_ASSOC);
             <i class="bi bi-list"></i>
         </button>
         <!-- Logo and Admin text (left side) -->
-        <a class="navbar-brand d-flex align-items-center" href="../index.html">
+        <a class="navbar-brand d-flex align-items-center" href="../index.php">
             <img src="../img/logo.png" class="img-fluid logo me-2" alt="HGS Logo" style="width: 50px; height: 50px;">
             <span class="fs-6 fw-bold text-white">Admin</span>
         </a>
@@ -686,6 +686,7 @@ $mountains = $result->fetch_all(MYSQLI_ASSOC);
         <a href="AUser.html"><i class="bi bi-people-fill"></i> User</a>
         <a href="AMountain.php" class="active"><i class="bi bi-triangle-fill"></i> Mountain</a>
         <a href="AAppeal.php"><i class="bi bi-chat-dots-fill"></i> Appeal</a>
+        <a href="ASentimentReport.php"><i class="fas fa-chart-line"></i> Sentiment Analysis</a>
         <a href="AReport.php"><i class="bi bi-file-earmark-text-fill"></i> Reports</a>
         <div class="text-center mt-4">
             <form action="../shared/logout.php" method="POST" class="d-flex justify-content-center">

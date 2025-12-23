@@ -8,6 +8,17 @@ $guiderID = $_SESSION['guiderID'];
 
 include '../shared/db_connection.php';
 
+// Fetch guider's bank account number
+$guiderNoAcc = '';
+$stmt = $conn->prepare("SELECT no_acc FROM guider WHERE guiderID = ?");
+$stmt->bind_param("i", $guiderID);
+$stmt->execute();
+$result = $stmt->get_result();
+if ($row = $result->fetch_assoc()) {
+    $guiderNoAcc = $row['no_acc'] ?? '';
+}
+$hasBankAccount = !empty(trim($guiderNoAcc));
+
 // Handle transfer payment form submission
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['transfer_payment'])) {
     $bookingID = intval($_POST['bookingID']);
@@ -649,6 +660,28 @@ if ($guiderID) {
       transform: translateY(-2px);
       box-shadow: 0 8px 25px rgba(40, 167, 69, 0.4);
     }
+
+    .btn-transfer:disabled {
+      cursor: not-allowed;
+      opacity: 0.7;
+      transform: none;
+    }
+
+    .btn-transfer:disabled:hover {
+      transform: none;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    }
+
+    .btn-transfer-disabled {
+      background: linear-gradient(135deg, #6b7280, #9ca3af) !important;
+      box-shadow: 0 4px 12px rgba(107, 114, 128, 0.3) !important;
+    }
+
+    .btn-transfer-disabled:hover {
+      background: linear-gradient(135deg, #6b7280, #9ca3af) !important;
+      box-shadow: 0 4px 12px rgba(107, 114, 128, 0.3) !important;
+    }
+
     .total-row {
       display: flex;
       align-items: center;
@@ -731,7 +764,7 @@ if ($guiderID) {
         <h1 class="navbar-title mx-auto">HIKING GUIDANCE SYSTEM</h1>
 
         <!-- logo (right) -->
-        <a class="navbar-brand" href="../index.html">
+        <a class="navbar-brand" href="../index.php">
           <img src="../img/logo.png" class="img-fluid logo" alt="HGS Logo">
         </a>
       </div>
@@ -760,6 +793,63 @@ if ($guiderID) {
 <!-- End Header -->
 
 <?php include_once '../shared/suspension_banner.php'; ?>
+
+<?php if (!$hasBankAccount): ?>
+<div class="bank-account-warning">
+  <div class="warning-content">
+    <i class="fas fa-exclamation-triangle warning-icon"></i>
+    <div class="warning-text">
+      <strong>Bank Account Required!</strong>
+      <p>Please add your bank account number in your <a href="GProfile.php">Profile Settings</a> to enable payment transfers.</p>
+    </div>
+  </div>
+</div>
+<style>
+  .bank-account-warning {
+    background: linear-gradient(135deg, #fef3c7, #fde68a);
+    border: 2px solid #f59e0b;
+    border-radius: 12px;
+    padding: 1rem 1.5rem;
+    margin: 1rem auto;
+    max-width: 1400px;
+    box-shadow: 0 4px 15px rgba(245, 158, 11, 0.2);
+  }
+  .warning-content {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+  }
+  .warning-icon {
+    font-size: 2rem;
+    color: #d97706;
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.1); opacity: 0.8; }
+  }
+  .warning-text {
+    flex: 1;
+  }
+  .warning-text strong {
+    color: #92400e;
+    font-size: 1.1rem;
+  }
+  .warning-text p {
+    margin: 0.25rem 0 0 0;
+    color: #78350f;
+    font-size: 0.95rem;
+  }
+  .warning-text a {
+    color: #1e40af;
+    font-weight: 600;
+    text-decoration: underline;
+  }
+  .warning-text a:hover {
+    color: #1e3a8a;
+  }
+</style>
+<?php endif; ?>
 
 <div class="main-container">
   <!-- Page Header -->
@@ -900,12 +990,19 @@ if ($guiderID) {
                 <i class="fas fa-print me-2"></i> Print
               </button>
               <?php if ($booking['transfer_status'] !== 'transferred'): ?>
+                <?php if ($hasBankAccount): ?>
                 <form method="POST" style="display: inline;">
                   <input type="hidden" name="bookingID" value="<?= $booking['bookingID'] ?>">
                   <button type="submit" name="transfer_payment" class="btn-transfer d-flex align-items-center justify-content-center">
                     <i class="fas fa-money-bill-transfer me-2"></i> Transfer
                   </button>
                 </form>
+                <?php else: ?>
+                <button class="btn-transfer btn-transfer-disabled d-flex align-items-center justify-content-center" disabled 
+                        title="Please add your bank account number in Profile Settings to enable transfers">
+                  <i class="fas fa-ban me-2"></i> No Bank Acc
+                </button>
+                <?php endif; ?>
               <?php else: ?>
                 <button class="btn-transfer d-flex align-items-center justify-content-center" disabled>
                   <i class="fas fa-check me-2"></i> Transferred

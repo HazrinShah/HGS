@@ -1,7 +1,12 @@
 <?php
+// TEMPORARY DEBUG - Remove after fixing
+ini_set('display_errors', 1);
+ini_set('display_startup_errors', 1);
+error_reporting(E_ALL);
+
 session_start();
 
-// Check if user is logged in
+// check user dah login ke tak
 if (!isset($_SESSION['hikerID'])) {
     header("Location: HLogin.html");
     exit;
@@ -34,22 +39,63 @@ if (isset($_GET['info'])) {
 
 include '../shared/db_connection.php';
 
+// Ensure table exists with lowercase name (case-sensitive on Linux)
+$conn->query("CREATE TABLE IF NOT EXISTS bookinghikerdetails (
+    hikerDetailID INT AUTO_INCREMENT PRIMARY KEY,
+    bookingID INT NOT NULL,
+    hikerName VARCHAR(255) NOT NULL,
+    identityCard VARCHAR(50) NOT NULL,
+    address TEXT NOT NULL,
+    phoneNumber VARCHAR(20) NOT NULL,
+    emergencyContactName VARCHAR(255) NOT NULL,
+    emergencyContactNumber VARCHAR(20) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_bookingID (bookingID)
+) ENGINE=InnoDB");
+
+function getHikerDetails($conn, $bookingID) {
+    $stmt = $conn->prepare("
+        SELECT hikerName, identityCard, address, phoneNumber, emergencyContactName, emergencyContactNumber
+        FROM bookinghikerdetails
+        WHERE bookingID = ?
+        ORDER BY hikerDetailID ASC
+    ");
+    if (!$stmt) {
+        error_log("getHikerDetails prepare failed: " . $conn->error);
+        return [];
+    }
+    $stmt->bind_param("i", $bookingID);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $details = $result->fetch_all(MYSQLI_ASSOC);
+    $stmt->close();
+    return $details;
+}
+
 // fetch booking dengan appeal yang complete atau pending. appeal la senang cakap
-$bookingQuery = "SELECT b.*, g.username as guiderName, g.price as guiderPrice, g.phone_number as guiderPhone, 
+// include: 1) close group bookings (hiker owner), 2) open group owner, 3) open group participant
+$bookingQuery = "SELECT DISTINCT b.*, g.username as guiderName, g.price as guiderPrice, g.phone_number as guiderPhone, 
                  g.profile_picture as guiderPicture, g.email as guiderEmail, g.experience as guiderExperience,
-                 g.profile_picture as guiderPicture, g.email as guiderEmail,
-                 m.name as mountainName, m.picture as mountainPicture, m.latitude as mountainLatitude, m.longitude as mountainLongitude 
+                 m.name as mountainName, m.picture as mountainPicture, m.latitude as mountainLatitude, m.longitude as mountainLongitude,
+                 bp.qty AS participantQty,
+                 CASE WHEN b.hikerID = ? THEN 1 ELSE 0 END as isOwner
                  FROM booking b 
                  JOIN guider g ON b.guiderID = g.guiderID 
                  JOIN mountain m ON b.mountainID = m.mountainID 
-                 WHERE b.hikerID = ? AND b.status = 'accepted' 
+                 LEFT JOIN bookingparticipant bp ON bp.bookingID = b.bookingID AND bp.hikerID = ?
+                 WHERE b.status = 'accepted' 
+                   AND (
+                     b.hikerID = ?
+                     OR
+                     (b.groupType = 'open' AND bp.hikerID IS NOT NULL)
+                   )
                  AND b.bookingID NOT IN (
                      SELECT DISTINCT bookingID FROM appeal 
                      WHERE status = 'pending'
                  )
-                 ORDER BY b.startDate ASC";
+                 ORDER BY b.created_at DESC";
 $stmt = $conn->prepare($bookingQuery);
-$stmt->bind_param("i", $hikerID);
+$stmt->bind_param("iii", $hikerID, $hikerID, $hikerID);
 $stmt->execute();
 $result = $stmt->get_result();
 $acceptedBookings = $result->fetch_all(MYSQLI_ASSOC);
@@ -73,7 +119,7 @@ $result = $stmt->get_result();
 $recentAppeals = $result->fetch_all(MYSQLI_ASSOC);
 $stmt->close();
 
-// Fetch appeals related to this hiker booking (both hiker and guider appeals)
+// ambil appeals related dengan booking hiker ni (both hiker dan guider appeals)
 $hikerAppeals = [];
 if ($hikerID) {
     $appealStmt = $conn->prepare("
@@ -110,8 +156,8 @@ if ($hikerID) {
     $appealStmt->close();
 }
 
-// Fetch pending appeals for the current user (both hiker and guider appeals)
-$appealQuery = "SELECT a.*, b.startDate, b.endDate, b.price, g.username as guiderName, g.profile_picture as guiderPicture, m.name as mountainName,
+// Fetch pending appeals for the current user (both hiker and guider appeals related to hiker's bookings)
+$appealQuery = "SELECT a.*, b.startDate, b.endDate, b.price, b.hikerID as bookingHikerID, g.username as guiderName, g.profile_picture as guiderPicture, m.name as mountainName,
                 CASE 
                     WHEN a.hikerID IS NOT NULL AND a.guiderID IS NULL THEN 'hiker'
                     WHEN a.guiderID IS NOT NULL AND a.hikerID IS NULL THEN 'guider'
@@ -121,16 +167,16 @@ $appealQuery = "SELECT a.*, b.startDate, b.endDate, b.price, g.username as guide
                 JOIN booking b ON a.bookingID = b.bookingID 
                 JOIN guider g ON b.guiderID = g.guiderID 
                 JOIN mountain m ON b.mountainID = m.mountainID 
-                WHERE b.hikerID = ? AND a.status = 'pending'
+                WHERE (b.hikerID = ? OR a.hikerID = ?) AND a.status IN ('pending', 'pending_refund', 'approved', 'onhold')
                 ORDER BY a.createdAt DESC";
 $stmt = $conn->prepare($appealQuery);
-$stmt->bind_param("i", $hikerID);
+$stmt->bind_param("ii", $hikerID, $hikerID);
 $stmt->execute();
 $result = $stmt->get_result();
 $pendingAppeals = $result->fetch_all(MYSQLI_ASSOC);
 $stmt->close();
 
-// Fetch processed appeals for the current user (approved/rejected)
+// Fetch processed appeals for the current user (approved/rejected/refunded/pending_refund)
 $processedAppealQuery = "SELECT a.*, b.startDate, b.endDate, b.price, g.username as guiderName, g.profile_picture as guiderPicture, m.name as mountainName,
                         CASE 
                             WHEN a.hikerID IS NOT NULL AND a.guiderID IS NULL THEN 'hiker'
@@ -141,9 +187,9 @@ $processedAppealQuery = "SELECT a.*, b.startDate, b.endDate, b.price, g.username
                         JOIN booking b ON a.bookingID = b.bookingID 
                         JOIN guider g ON b.guiderID = g.guiderID 
                         JOIN mountain m ON b.mountainID = m.mountainID 
-                        WHERE b.hikerID = ? AND a.status IN ('approved', 'rejected', 'refunded', 'resolved')
+                        WHERE b.hikerID = ? AND a.status IN ('approved', 'rejected', 'refunded', 'resolved', 'pending_refund', 'refund_rejected')
                         ORDER BY a.updatedAt DESC
-                        LIMIT 5";
+                        LIMIT 10";
 $stmt = $conn->prepare($processedAppealQuery);
 $stmt->bind_param("i", $hikerID);
 $stmt->execute();
@@ -226,12 +272,57 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         switch ($action) {
             case 'done':
                 // Update booking status to completed and redirect to rate/review
-                $updateQuery = "UPDATE booking SET status = 'completed' WHERE bookingID = ? AND hikerID = ?";
-                $updateStmt = $conn->prepare($updateQuery);
-                $updateStmt->bind_param("ii", $bookingID, $hikerID);
-                if ($updateStmt->execute()) {
-                    header("Location: HRateReview.php?bookingID=" . $bookingID);
-                    exit;
+                // First check if user is authorized (either owner or participant in open group)
+                $authCheckQuery = "SELECT b.bookingID, b.groupType, b.hikerID as ownerID 
+                                   FROM booking b 
+                                   LEFT JOIN bookingparticipant bp ON bp.bookingID = b.bookingID AND bp.hikerID = ?
+                                   WHERE b.bookingID = ? 
+                                   AND (b.hikerID = ? OR (b.groupType = 'open' AND bp.hikerID IS NOT NULL))";
+                $authStmt = $conn->prepare($authCheckQuery);
+                $authStmt->bind_param("iii", $hikerID, $bookingID, $hikerID);
+                $authStmt->execute();
+                $authResult = $authStmt->get_result();
+                
+                if ($authResult->num_rows > 0) {
+                    $bookingInfo = $authResult->fetch_assoc();
+                    $authStmt->close();
+                    
+                    // Only the booking owner can mark as completed
+                    // For open group, we still need the owner to mark it done
+                    // But participants should be able to go to review page
+                    if ($bookingInfo['ownerID'] == $hikerID) {
+                        // User is the owner - can update status
+                        $updateQuery = "UPDATE booking SET status = 'completed' WHERE bookingID = ?";
+                        $updateStmt = $conn->prepare($updateQuery);
+                        $updateStmt->bind_param("i", $bookingID);
+                        if ($updateStmt->execute()) {
+                            error_log("Booking $bookingID marked as completed by owner hikerID: $hikerID");
+                            header("Location: HRateReview.php?bookingID=" . $bookingID);
+                            exit;
+                        }
+                    } else {
+                        // User is participant in open group - check if already completed
+                        $statusCheck = $conn->prepare("SELECT status FROM booking WHERE bookingID = ?");
+                        $statusCheck->bind_param("i", $bookingID);
+                        $statusCheck->execute();
+                        $statusResult = $statusCheck->get_result();
+                        $currentStatus = $statusResult->fetch_assoc();
+                        $statusCheck->close();
+                        
+                        if ($currentStatus && $currentStatus['status'] === 'completed') {
+                            // Already completed, just redirect to review
+                            header("Location: HRateReview.php?bookingID=" . $bookingID);
+                            exit;
+                        } else {
+                            // Not completed yet - participant cannot mark as done, only owner can
+                            $error = "Only the booking owner can mark this trip as done.";
+                            error_log("Participant hikerID $hikerID tried to mark open group booking $bookingID as done - denied");
+                        }
+                    }
+                } else {
+                    $authStmt->close();
+                    $error = "You are not authorized to mark this booking as done.";
+                    error_log("Unauthorized mark as done attempt - bookingID: $bookingID, hikerID: $hikerID");
                 }
                 break;
                 
@@ -341,7 +432,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     }
 }
 
-$conn->close();
+// Don't close connection here - it's needed later in the HTML output for getHikerDetails()
+// $conn->close();
 ?>
 
 <!DOCTYPE html>
@@ -435,6 +527,37 @@ $conn->close();
       align-items: center;
     }
 
+    /* Section Close Button */
+    .section-close-btn {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      border: none;
+      background: linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%);
+      color: #6b7280;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+
+    .section-close-btn:hover {
+      background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
+      color: #dc2626;
+      transform: scale(1.1);
+      box-shadow: 0 4px 8px rgba(220, 38, 38, 0.2);
+    }
+
+    .section-close-btn:active {
+      transform: scale(0.95);
+    }
+
+    .section-close-btn i {
+      font-size: 0.85rem;
+    }
+
     /* Appeal Cards */
     .appeal-card {
       background: white;
@@ -459,13 +582,15 @@ $conn->close();
     }
 
     .appeal-type {
-      padding: 0.5rem 1rem;
+      padding: 0.5rem 0.75rem;
       border-radius: 20px;
       font-size: 0.85rem;
       font-weight: 600;
       color: white;
-      display: flex;
+      display: inline-flex;
       align-items: center;
+      white-space: nowrap;
+      width: fit-content;
     }
 
     .appeal-type-cancellation {
@@ -1075,6 +1200,132 @@ $conn->close();
       font-weight: 600;
     }
 
+    /* Hiker Details Button */
+    .btn-view-hiker-details {
+      background: linear-gradient(135deg, var(--guider-blue), var(--guider-blue-light));
+      color: white;
+      border: none;
+      border-radius: 10px;
+      padding: 10px 20px;
+      font-weight: 600;
+      font-size: 0.95rem;
+      transition: all 0.3s ease;
+      box-shadow: 0 4px 12px rgba(30, 64, 175, 0.3);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .btn-view-hiker-details:hover {
+      background: linear-gradient(135deg, var(--guider-blue-dark), var(--guider-blue));
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(30, 64, 175, 0.4);
+      color: white;
+    }
+
+    .btn-view-hiker-details:active {
+      transform: translateY(0);
+    }
+
+    /* Hiker Details Modal */
+    .hiker-detail-card {
+      background: white;
+      border-radius: 12px;
+      padding: 1.5rem;
+      margin-bottom: 1rem;
+      border: 2px solid var(--guider-blue-soft);
+      transition: all 0.3s ease;
+    }
+
+    .hiker-detail-card:hover {
+      border-color: var(--guider-blue);
+      box-shadow: 0 4px 12px rgba(30, 64, 175, 0.15);
+    }
+
+    .hiker-detail-header {
+      display: flex;
+      align-items: center;
+      margin-bottom: 1rem;
+      padding-bottom: 0.75rem;
+      border-bottom: 2px solid var(--guider-blue-soft);
+    }
+
+    .hiker-detail-header h6 {
+      margin: 0;
+      color: var(--guider-blue-dark);
+      font-weight: 700;
+      font-size: 1.1rem;
+    }
+
+    .hiker-detail-badge {
+      background: linear-gradient(135deg, var(--guider-blue), var(--guider-blue-light));
+      color: white;
+      padding: 0.25rem 0.75rem;
+      border-radius: 20px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      margin-left: auto;
+    }
+
+    .hiker-info-item {
+      display: flex;
+      align-items: flex-start;
+      margin-bottom: 0.75rem;
+      padding: 0.5rem;
+      background: #f8f9fa;
+      border-radius: 8px;
+    }
+
+    .hiker-info-label {
+      font-weight: 600;
+      color: var(--guider-blue-dark);
+      min-width: 160px;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .hiker-info-label i {
+      color: var(--guider-blue);
+      width: 20px;
+    }
+
+    .hiker-info-value {
+      color: #374151;
+      flex: 1;
+    }
+
+    .hiker-info-value a {
+      color: var(--guider-blue);
+      transition: color 0.2s ease;
+    }
+
+    .hiker-info-value a:hover {
+      color: var(--guider-blue-dark);
+      text-decoration: underline;
+    }
+
+    .hiker-info-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    @media (max-width: 768px) {
+      .hiker-info-item {
+        flex-direction: column;
+        gap: 0.5rem;
+      }
+
+      .hiker-info-label {
+        min-width: auto;
+      }
+
+      .btn-view-hiker-details {
+        width: 100%;
+      }
+    }
+
 
     /* Custom Popup Notifications */
     .custom-popup-overlay {
@@ -1262,7 +1513,7 @@ $conn->close();
           <span class="navbar-toggler-icon"></span>
         </button>
         <h1 class="navbar-title text-white mx-auto">HIKING GUIDANCE SYSTEM</h1>
-        <a class="navbar-brand" href="../index.html">
+        <a class="navbar-brand" href="../index.php">
           <img src="../img/logo.png" class="img-fluid logo" alt="HGS Logo">
         </a>
       </div>
@@ -1295,16 +1546,36 @@ $conn->close();
   <main class="main-content">
     <div class="container">
       <?php if (!empty($recentAppeals)): ?>
-        <div class="mb-4">
-          <h5 class="section-title"><i class="bi bi-bell me-2"></i>Recent Appeal Results</h5>
+        <div class="mb-4" id="recentAppealsSection">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <h5 class="section-title mb-0"><i class="bi bi-bell me-2"></i>Recent Appeal Results</h5>
+            <button type="button" class="section-close-btn" onclick="this.closest('.mb-4').style.display='none'" title="Dismiss this section">
+              <i class="fas fa-times"></i>
+            </button>
+          </div>
           <div class="row">
             <?php foreach ($recentAppeals as $appeal): ?>
               <div class="col-12 mb-3">
                 <div class="appeal-card processed-appeal">
                   <div class="appeal-header">
                     <div class="d-flex flex-column">
-                      <span class="appeal-type <?= 'appeal-type-' . htmlspecialchars($appeal['appealType']) ?>">
-                        <i class="bi bi-flag me-2"></i><?= ucfirst(htmlspecialchars($appeal['appealType'])) ?>
+                      <?php 
+                        $typeIcons = [
+                          'cancellation' => 'fas fa-times-circle',
+                          'refund' => 'fas fa-money-bill-wave',
+                          'change' => 'fas fa-exchange-alt'
+                        ];
+                        $typeLabels = [
+                          'cancellation' => 'Cancellation',
+                          'refund' => 'Refund',
+                          'change' => 'Change Guider'
+                        ];
+                        $appealType = htmlspecialchars($appeal['appealType']);
+                        $icon = isset($typeIcons[$appealType]) ? $typeIcons[$appealType] : 'bi bi-flag';
+                        $label = isset($typeLabels[$appealType]) ? $typeLabels[$appealType] : ucfirst($appealType);
+                      ?>
+                      <span class="appeal-type <?= 'appeal-type-' . $appealType ?>">
+                        <i class="<?= $icon ?> me-1"></i><?= $label ?>
                       </span>
                       <small class="appeal-date">Updated: <?= date('d M Y, h:i A', strtotime($appeal['updatedAt'])) ?></small>
                     </div>
@@ -1400,10 +1671,15 @@ $conn->close();
 
       <!-- Pending Appeals Section -->
       <?php if (!empty($pendingAppeals)): ?>
-        <div class="pending-appeals-section mb-4">
-          <h3 class="section-title">
-            <i class="fas fa-clock me-2"></i>Pending Requests
-          </h3>
+        <div class="pending-appeals-section mb-4" id="activeRequestsSection">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <h3 class="section-title mb-0">
+              <i class="fas fa-clock me-2"></i>Active Requests
+            </h3>
+            <button type="button" class="section-close-btn" onclick="this.closest('.pending-appeals-section').style.display='none'" title="Dismiss this section">
+              <i class="fas fa-times"></i>
+            </button>
+          </div>
           <div class="row">
             <?php foreach ($pendingAppeals as $appeal): ?>
               <div class="col-md-6 col-lg-4 mb-3">
@@ -1422,14 +1698,36 @@ $conn->close();
                           'change' => 'Change Guider'
                         ];
                       ?>
-                      <i class="<?php echo $typeIcons[$appeal['appealType']]; ?> me-1"></i>
-                      <?php echo $typeLabels[$appeal['appealType']]; ?>
+                      <i class="<?php echo $typeIcons[$appeal['appealType']] ?? 'fas fa-question-circle'; ?> me-1"></i>
+                      <?php echo $typeLabels[$appeal['appealType']] ?? $appeal['appealType']; ?>
                     </span>
-                    <span class="appeal-status">Pending</span>
+                    <?php 
+                      $statusLabels = [
+                        'pending' => 'Pending',
+                        'pending_refund' => 'Refund Pending Approval',
+                        'approved' => 'Approved',
+                        'onhold' => 'On Hold'
+                      ];
+                      $statusClasses = [
+                        'pending' => 'appeal-status',
+                        'pending_refund' => 'appeal-status bg-warning text-dark',
+                        'approved' => 'appeal-status bg-success',
+                        'onhold' => 'appeal-status bg-info'
+                      ];
+                    ?>
+                    <span class="<?php echo $statusClasses[$appeal['status']] ?? 'appeal-status'; ?>">
+                      <?php echo $statusLabels[$appeal['status']] ?? ucfirst($appeal['status']); ?>
+                    </span>
                   </div>
                   <div class="appeal-content">
                     <h6 class="appeal-booking"><?php echo htmlspecialchars($appeal['mountainName']); ?></h6>
                     <p class="appeal-guider">Guider: <?php echo htmlspecialchars($appeal['guiderName']); ?></p>
+                    <?php if ($appeal['status'] === 'pending_refund'): ?>
+                      <div class="alert alert-warning py-2 px-3 mb-2">
+                        <i class="fas fa-clock me-1"></i>
+                        <strong>Waiting for admin approval</strong> - Your refund request is being reviewed.
+                      </div>
+                    <?php endif; ?>
                     <p class="appeal-submitted-by">
                       <strong>Requested by:</strong> 
                       <?php if ($appeal['appealFrom'] === 'hiker'): ?>
@@ -1469,10 +1767,15 @@ $conn->close();
 
       <!-- Processed Appeals Section -->
       <?php if (!empty($processedAppeals)): ?>
-        <div class="processed-appeals-section mb-4">
-          <h3 class="section-title">
-            <i class="fas fa-check-circle me-2"></i>Recent Request Results
-          </h3>
+        <div class="processed-appeals-section mb-4" id="recentRequestResultsSection">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <h3 class="section-title mb-0">
+              <i class="fas fa-check-circle me-2"></i>Recent Request Results
+            </h3>
+            <button type="button" class="section-close-btn" onclick="this.closest('.processed-appeals-section').style.display='none'" title="Dismiss this section">
+              <i class="fas fa-times"></i>
+            </button>
+          </div>
           <div class="row">
             <?php foreach ($processedAppeals as $appeal): ?>
               <div class="col-md-6 col-lg-4 mb-3">
@@ -1495,7 +1798,17 @@ $conn->close();
                       <?php echo $typeLabels[$appeal['appealType']]; ?>
                     </span>
                     <span class="appeal-status appeal-status-<?php echo $appeal['status']; ?>">
-                      <?php echo ucfirst($appeal['status']); ?>
+                      <?php 
+                        $statusLabels = [
+                          'approved' => 'Approved',
+                          'rejected' => 'Rejected',
+                          'refunded' => 'Refunded',
+                          'resolved' => 'Resolved',
+                          'pending_refund' => 'Refund Pending',
+                          'refund_rejected' => 'Refund Rejected'
+                        ];
+                        echo $statusLabels[$appeal['status']] ?? ucfirst($appeal['status']); 
+                      ?>
                     </span>
                   </div>
                   <div class="appeal-content">
@@ -1529,9 +1842,19 @@ $conn->close();
                       </div>
                     <?php endif; ?>
                     <?php if ($appeal['status'] === 'refunded'): ?>
-                      <div class="refund-notice">
-                        <i class="fas fa-info-circle me-1"></i>
-                        Payment will be processed and inserted within 3 working days.
+                      <div class="refund-notice" style="background: #d4edda; border: 1px solid #c3e6cb; padding: 8px; border-radius: 5px; margin-top: 8px;">
+                        <i class="fas fa-check-circle me-1 text-success"></i>
+                        <strong>Refund Approved!</strong> Payment will be processed within 3 working days.
+                      </div>
+                    <?php elseif ($appeal['status'] === 'pending_refund'): ?>
+                      <div class="refund-notice" style="background: #fff3cd; border: 1px solid #ffc107; padding: 8px; border-radius: 5px; margin-top: 8px;">
+                        <i class="fas fa-clock me-1 text-warning"></i>
+                        <strong>Waiting for Admin Approval</strong> - Your refund request is being reviewed.
+                      </div>
+                    <?php elseif ($appeal['status'] === 'refund_rejected'): ?>
+                      <div class="refund-notice" style="background: #f8d7da; border: 1px solid #f5c6cb; padding: 8px; border-radius: 5px; margin-top: 8px;">
+                        <i class="fas fa-times-circle me-1 text-danger"></i>
+                        <strong>Refund Rejected</strong> - Booking was cancelled without refund.
                       </div>
                     <?php endif; ?>
                     <small class="appeal-date">Processed: <?php echo date('M j, Y g:i A', strtotime($appeal['updatedAt'])); ?></small>
@@ -1649,6 +1972,21 @@ $conn->close();
                       </span>
                       <span class="booking-detail-value"><?php echo $booking['totalHiker']; ?> person(s)</span>
                     </div>
+                    <?php 
+                    $hikerDetails = getHikerDetails($conn, $booking['bookingID']);
+                    if (!empty($hikerDetails)): 
+                    ?>
+                    <div class="booking-detail" style="grid-column: 1 / -1;">
+                      <span class="booking-detail-label">
+                        <i class="fas fa-user-friends"></i>Hiker Details
+                      </span>
+                      <div class="mt-2">
+                        <button class="btn btn-view-hiker-details" type="button" data-bs-toggle="modal" data-bs-target="#hikerDetailsModal<?= $booking['bookingID'] ?>">
+                          <i class="fas fa-users me-2"></i>View Hiker Details (<?= count($hikerDetails) ?>)
+                        </button>
+                      </div>
+                    </div>
+                    <?php endif; ?>
                     <div class="booking-detail">
                       <span class="booking-detail-label">
                         <i class="fas fa-money-bill-wave"></i>Total Amount
@@ -1869,6 +2207,100 @@ $conn->close();
                   <?php endif; ?>
                 </div>
               </div>
+            <?php 
+            // Create modal for hiker details for each booking
+            $hikerDetailsForModal = getHikerDetails($conn, $booking['bookingID']);
+            if (!empty($hikerDetailsForModal)): 
+            ?>
+            <!-- Hiker Details Modal for Booking <?= $booking['bookingID'] ?> -->
+            <div class="modal fade" id="hikerDetailsModal<?= $booking['bookingID'] ?>" tabindex="-1" aria-labelledby="hikerDetailsModalLabel<?= $booking['bookingID'] ?>" aria-hidden="true">
+              <div class="modal-dialog modal-dialog-centered modal-lg">
+                <div class="modal-content">
+                  <div class="modal-header">
+                    <h5 class="modal-title" id="hikerDetailsModalLabel<?= $booking['bookingID'] ?>">
+                      <i class="fas fa-users me-2"></i>Hiker Details - Booking #<?= $booking['bookingID'] ?>
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                  </div>
+                  <div class="modal-body" style="max-height: 70vh; overflow-y: auto;">
+                    <div class="mb-3">
+                      <p class="text-muted mb-0">
+                        <i class="fas fa-info-circle me-2"></i>
+                        Total of <strong><?= count($hikerDetailsForModal) ?></strong> hiker(s) registered for this booking
+                      </p>
+                    </div>
+                    <?php foreach ($hikerDetailsForModal as $index => $hiker): ?>
+                    <div class="hiker-detail-card">
+                      <div class="hiker-detail-header">
+                        <h6>
+                          <i class="fas fa-user me-2"></i>Hiker <?= $index + 1 ?>
+                        </h6>
+                        <span class="hiker-detail-badge"><?= htmlspecialchars($hiker['hikerName']) ?></span>
+                      </div>
+                      <div class="hiker-info-grid">
+                        <div class="hiker-info-item">
+                          <div class="hiker-info-label">
+                            <i class="fas fa-id-card"></i>
+                            <span>Full Name:</span>
+                          </div>
+                          <div class="hiker-info-value"><?= htmlspecialchars($hiker['hikerName']) ?></div>
+                        </div>
+                        <div class="hiker-info-item">
+                          <div class="hiker-info-label">
+                            <i class="fas fa-passport"></i>
+                            <span>IC/Passport:</span>
+                          </div>
+                          <div class="hiker-info-value"><?= htmlspecialchars($hiker['identityCard']) ?></div>
+                        </div>
+                        <div class="hiker-info-item">
+                          <div class="hiker-info-label">
+                            <i class="fas fa-phone"></i>
+                            <span>Phone Number:</span>
+                          </div>
+                          <div class="hiker-info-value">
+                            <a href="tel:<?= htmlspecialchars($hiker['phoneNumber']) ?>" class="text-decoration-none">
+                              <?= htmlspecialchars($hiker['phoneNumber']) ?>
+                            </a>
+                          </div>
+                        </div>
+                        <div class="hiker-info-item">
+                          <div class="hiker-info-label">
+                            <i class="fas fa-map-marker-alt"></i>
+                            <span>Address:</span>
+                          </div>
+                          <div class="hiker-info-value"><?= nl2br(htmlspecialchars($hiker['address'])) ?></div>
+                        </div>
+                        <div class="hiker-info-item">
+                          <div class="hiker-info-label">
+                            <i class="fas fa-user-shield"></i>
+                            <span>Emergency Contact:</span>
+                          </div>
+                          <div class="hiker-info-value"><?= htmlspecialchars($hiker['emergencyContactName']) ?></div>
+                        </div>
+                        <div class="hiker-info-item">
+                          <div class="hiker-info-label">
+                            <i class="fas fa-phone-alt"></i>
+                            <span>Emergency Phone:</span>
+                          </div>
+                          <div class="hiker-info-value">
+                            <a href="tel:<?= htmlspecialchars($hiker['emergencyContactNumber']) ?>" class="text-decoration-none">
+                              <?= htmlspecialchars($hiker['emergencyContactNumber']) ?>
+                            </a>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    <?php endforeach; ?>
+                  </div>
+                  <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                      <i class="fas fa-times me-2"></i>Close
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <?php endif; ?>
             <?php endforeach; ?>
           <?php endif; ?>
         </div>
@@ -2255,37 +2687,71 @@ $conn->close();
   </script>
 
   <script>
+    // Fallback function jika Google Maps tak load
+    function showMapFallback() {
+      document.querySelectorAll('.map-placeholder').forEach(function(el){
+        const lat = el.getAttribute('data-latitude');
+        const lng = el.getAttribute('data-longitude');
+        if (lat && lng && !isNaN(parseFloat(lat)) && !isNaN(parseFloat(lng))) {
+          el.innerHTML = '<a href="https://www.google.com/maps?q=' + lat + ',' + lng + '" target="_blank" style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--guider-blue);text-decoration:none;font-size:14px;"><i class="fas fa-map-marker-alt me-2"></i>View on Maps</a>';
+        } else {
+          el.innerHTML = '<span style="display:flex;align-items:center;justify-content:center;height:100%;color:#999;font-size:12px;">No location</span>';
+        }
+      });
+    }
+    
     function renderRowMaps(){
-      if(!(window.google && google.maps)) return;
+      if(!(window.google && google.maps)) {
+        console.log('Google Maps not loaded, showing fallback');
+        showMapFallback();
+        return;
+      }
       document.querySelectorAll('.map-placeholder').forEach(function(el){
         const lat = parseFloat(el.getAttribute('data-latitude'));
         const lng = parseFloat(el.getAttribute('data-longitude'));
         if (isNaN(lat) || isNaN(lng)) {
-          el.textContent = 'No coordinates';
-          el.style.display = 'flex';
-          el.style.alignItems = 'center';
-          el.style.justifyContent = 'center';
+          el.innerHTML = '<span style="display:flex;align-items:center;justify-content:center;height:100%;color:#999;font-size:12px;">No location</span>';
           return;
         }
-        const m = new google.maps.Map(el, {
-          center: { lat, lng },
-          zoom: 10,
-          disableDefaultUI: true,
-          gestureHandling: 'none'
-        });
-        new google.maps.Marker({ position: { lat, lng }, map: m });
-        el.style.cursor = 'pointer';
-        el.title = 'Open in Google Maps';
-        el.addEventListener('click', function(){
-          window.open(`https://www.google.com/maps?q=${lat},${lng}`, '_blank', 'noopener');
-        });
+        try {
+          const m = new google.maps.Map(el, {
+            center: { lat, lng },
+            zoom: 10,
+            disableDefaultUI: true,
+            gestureHandling: 'none'
+          });
+          new google.maps.Marker({ position: { lat, lng }, map: m });
+          el.style.cursor = 'pointer';
+          el.title = 'Open in Google Maps';
+          el.addEventListener('click', function(){
+            window.open(`https://www.google.com/maps?q=${lat},${lng}`, '_blank', 'noopener');
+          });
+        } catch(e) {
+          console.error('Map error:', e);
+          el.innerHTML = '<a href="https://www.google.com/maps?q=' + lat + ',' + lng + '" target="_blank" style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--guider-blue);text-decoration:none;font-size:14px;"><i class="fas fa-map-marker-alt me-2"></i>View on Maps</a>';
+        }
       });
     }
-    window.initMap = function(){ try { renderRowMaps(); } catch(e) { console.error(e); } };
+    window.initMap = function(){ try { renderRowMaps(); } catch(e) { console.error(e); showMapFallback(); } };
+    
+    // Fallback timer - jika Google Maps tak load dalam 5 saat, show fallback
+    setTimeout(function() {
+      if (!(window.google && google.maps)) {
+        console.log('Google Maps timeout, showing fallback');
+        showMapFallback();
+      }
+    }, 5000);
   </script>
   <script async src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBQBKen6oHNUxX1Mg6lL5rZMVy_LReklqY&loading=async&callback=initMap"></script>
+
+<?php include_once '../AIChatbox/chatbox_include.php'; ?>
 
 </body>
 </html>
 
-
+<?php
+// Close database connection at the very end after all queries are done
+if (isset($conn)) {
+    $conn->close();
+}
+?>

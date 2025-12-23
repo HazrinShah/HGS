@@ -382,7 +382,7 @@ if ($guiderID) {
       <h1 class="navbar-title mx-auto">HIKING GUIDANCE SYSTEM</h1>
 
       <!-- logo (right) -->
-      <a class="navbar-brand" href="../index.html">
+      <a class="navbar-brand" href="../index.php">
         <img src="../img/logo.png" class="img-fluid logo" alt="HGS Logo">
       </a>
     </div>

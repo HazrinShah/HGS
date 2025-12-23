@@ -1,38 +1,86 @@
 <?php
+// Start output buffering to catch any stray output
+ob_start();
+
 session_start();
 
-// Check if admin is logged in
-if (!isset($_SESSION['email'])) {
-    http_response_code(401);
-    echo json_encode(['success' => false, 'message' => 'Unauthorized access']);
+// Disable display of errors - only log them
+error_reporting(E_ALL);
+ini_set('display_errors', 0);
+ini_set('log_errors', 1);
+ini_set('error_log', __DIR__ . '/../logs/process_appeal_errors.log');
+
+// Set JSON header
+header('Content-Type: application/json');
+
+// Custom error handler to prevent any output
+set_error_handler(function($errno, $errstr, $errfile, $errline) {
+    error_log("PHP Error [$errno]: $errstr in $errfile on line $errline");
+    return true; // Don't execute PHP's internal error handler
+});
+
+// Custom exception handler
+set_exception_handler(function($exception) {
+    error_log("Uncaught Exception: " . $exception->getMessage());
+    ob_end_clean(); // Clear any output
+    echo json_encode(['success' => false, 'message' => 'Server error occurred']);
     exit();
-}
+});
 
 require_once '../shared/db_connection.php';
 
-// Verify the email belongs to an admin
-$email = $_SESSION['email'];
-$stmt = $conn->prepare("SELECT * FROM admin WHERE email = ?");
-$stmt->bind_param("s", $email);
-$stmt->execute();
-$result = $stmt->get_result();
+// Log the request for debugging
+error_log("process_appeal.php called - Session data: " . print_r($_SESSION, true));
 
-if ($result->num_rows === 0) {
-    http_response_code(401);
-    echo json_encode(['success' => false, 'message' => 'Unauthorized access']);
-    exit();
-}
-
-// Get JSON input
+// dapat JSON input
 $input = json_decode(file_get_contents('php://input'), true);
+
+// Log the input
+error_log("Input received: " . print_r($input, true));
 
 if (!$input || !isset($input['action'])) {
     http_response_code(400);
-    echo json_encode(['success' => false, 'message' => 'Invalid request']);
+    echo json_encode(['success' => false, 'message' => 'Invalid request - no action specified']);
     exit();
 }
 
 $action = $input['action'];
+
+// Actions that hikers can perform
+$hikerAllowedActions = ['hiker_chose_refund', 'hiker_chose_change'];
+
+// Check authentication based on action type
+if (in_array($action, $hikerAllowedActions)) {
+    // Allow hiker session for these actions
+    if (!isset($_SESSION['hikerID'])) {
+        error_log("Hiker session not found for action: $action");
+        http_response_code(401);
+        echo json_encode(['success' => false, 'message' => 'Unauthorized access - please login as hiker. Session: ' . (empty($_SESSION) ? 'empty' : 'exists but no hikerID')]);
+        exit();
+    }
+    error_log("Hiker authenticated: hikerID = " . $_SESSION['hikerID']);
+} else {
+    // Require admin session for all other actions
+    if (!isset($_SESSION['email'])) {
+        http_response_code(401);
+        echo json_encode(['success' => false, 'message' => 'Unauthorized access']);
+        exit();
+    }
+    
+    // verify email ni admin ke tak
+    $email = $_SESSION['email'];
+    $stmt = $conn->prepare("SELECT * FROM admin WHERE email = ?");
+    $stmt->bind_param("s", $email);
+    $stmt->execute();
+    $result = $stmt->get_result();
+
+    if ($result->num_rows === 0) {
+        http_response_code(401);
+        echo json_encode(['success' => false, 'message' => 'Unauthorized access']);
+        exit();
+    }
+}
+
 $response = ['success' => false, 'message' => 'Unknown action'];
 
 try {
@@ -69,6 +117,14 @@ try {
             $response = hikerChoseRefund($conn, $input);
             break;
             
+        case 'approve_refund':
+            $response = approveRefund($conn, $input);
+            break;
+            
+        case 'reject_refund':
+            $response = rejectRefund($conn, $input);
+            break;
+            
         case 'hiker_chose_change':
             $response = hikerChoseChange($conn, $input);
             break;
@@ -77,30 +133,94 @@ try {
             $response = ['success' => false, 'message' => 'Invalid action'];
     }
 } catch (Exception $e) {
+    error_log("Exception caught: " . $e->getMessage());
     $response = ['success' => false, 'message' => 'Database error: ' . $e->getMessage()];
 }
 
+// Clear any buffered output and send clean JSON
+ob_end_clean();
 echo json_encode($response);
 
 function acceptGuiderAppeal($conn, $input) {
-    $appealId = $input['appealId'];
-    $bookingId = $input['bookingId'];
+    error_log("acceptGuiderAppeal called with input: " . print_r($input, true));
     
-    // Update appeal status to approved
-    $stmt = $conn->prepare("UPDATE appeal SET status = 'approved', updatedAt = NOW() WHERE appealID = ?");
-    $stmt->bind_param("i", $appealId);
+    if (!isset($input['appealId']) || !isset($input['bookingId'])) {
+        error_log("Missing appealId or bookingId in acceptGuiderAppeal");
+        return ['success' => false, 'message' => 'Missing appealId or bookingId'];
+    }
+    
+    $appealId = intval($input['appealId']);
+    $bookingId = intval($input['bookingId']);
+    
+    // check kalau ni change request
+    $checkStmt = $conn->prepare("SELECT appealType FROM appeal WHERE appealID = ?");
+    if (!$checkStmt) {
+        error_log("Prepare failed for appealType check: " . $conn->error);
+        return ['success' => false, 'message' => 'Database error: ' . $conn->error];
+    }
+    $checkStmt->bind_param("i", $appealId);
+    $checkStmt->execute();
+    $result = $checkStmt->get_result();
+    $appeal = $result->fetch_assoc();
+    $checkStmt->close();
+    
+    error_log("Appeal data: " . print_r($appeal, true));
+    
+    // kalau ni change request, set status jadi 'onhold' supaya button change muncul
+    // kalau cancellation request, cancel booking terus
+    // kalau bukan, set jadi 'approved'
+    $appealType = ($appeal && isset($appeal['appealType'])) ? $appeal['appealType'] : '';
+    
+    if ($appealType === 'change') {
+        $newStatus = 'onhold';
+    } else {
+        $newStatus = 'approved';
+    }
+    
+    error_log("Setting appeal status to: $newStatus for appealType: $appealType");
+    
+    // update appeal status
+    $stmt = $conn->prepare("UPDATE appeal SET status = ?, updatedAt = NOW() WHERE appealID = ?");
+    if (!$stmt) {
+        error_log("Prepare failed for appeal update: " . $conn->error);
+        return ['success' => false, 'message' => 'Database error: ' . $conn->error];
+    }
+    $stmt->bind_param("si", $newStatus, $appealId);
     
     if ($stmt->execute()) {
+        error_log("Appeal status updated successfully");
+        
+        // If it's a change request, put booking on hold
+        if ($appealType === 'change') {
+            $stmt2 = $conn->prepare("UPDATE booking SET status = 'OnHold' WHERE bookingID = ?");
+            if ($stmt2) {
+                $stmt2->bind_param("i", $bookingId);
+                $stmt2->execute();
+                error_log("Booking set to OnHold");
+            }
+        }
+        
+        // If it's a cancellation request from guider, cancel the booking immediately
+        if ($appealType === 'cancellation') {
+            $stmt3 = $conn->prepare("UPDATE booking SET status = 'cancelled' WHERE bookingID = ?");
+            if ($stmt3) {
+                $stmt3->bind_param("i", $bookingId);
+                $stmt3->execute();
+                error_log("Booking $bookingId cancelled due to approved guider cancellation appeal");
+            }
+        }
+        
         return ['success' => true, 'message' => 'Guider appeal accepted successfully'];
     } else {
-        return ['success' => false, 'message' => 'Failed to accept guider appeal'];
+        error_log("Failed to update appeal status: " . $stmt->error);
+        return ['success' => false, 'message' => 'Failed to accept guider appeal: ' . $stmt->error];
     }
 }
 
 function rejectAppeal($conn, $input) {
     $appealId = $input['appealId'];
     
-    // Update appeal status to rejected
+    // update appeal status jadi rejected
     $stmt = $conn->prepare("UPDATE appeal SET status = 'rejected', updatedAt = NOW() WHERE appealID = ?");
     $stmt->bind_param("i", $appealId);
     
@@ -121,9 +241,21 @@ function acceptHikerAppeal($conn, $input) {
     $appealId = $input['appealId'];
     $bookingId = $input['bookingId'];
     
-    // Mark appeal as approved so admin card shows refund/change actions
-    $stmt = $conn->prepare("UPDATE appeal SET status = 'approved', updatedAt = NOW() WHERE appealID = ?");
-    $stmt->bind_param("i", $appealId);
+    // check kalau ni change request
+    $checkStmt = $conn->prepare("SELECT appealType FROM appeal WHERE appealID = ?");
+    $checkStmt->bind_param("i", $appealId);
+    $checkStmt->execute();
+    $result = $checkStmt->get_result();
+    $appeal = $result->fetch_assoc();
+    $checkStmt->close();
+    
+    // kalau ni change request, set status jadi 'onhold' supaya button change muncul
+    // kalau bukan, set jadi 'approved' untuk cancellation/refund requests
+    $newStatus = ($appeal && isset($appeal['appealType']) && $appeal['appealType'] === 'change') ? 'onhold' : 'approved';
+    
+    // update appeal status
+    $stmt = $conn->prepare("UPDATE appeal SET status = ?, updatedAt = NOW() WHERE appealID = ?");
+    $stmt->bind_param("si", $newStatus, $appealId);
     
     if ($stmt->execute()) {
         // Put the booking on hold so it won't appear as an active booking
@@ -249,18 +381,20 @@ function hikerChoseRefund($conn, $input) {
     $appealId = $input['appealId'];
     $bookingId = $input['bookingId'];
     
-    // Immediately mark booking cancelled and appeal refunded
-    $stmt = $conn->prepare("UPDATE booking SET status = 'cancelled' WHERE bookingID = ?");
-    $stmt->bind_param("i", $bookingId);
+    // Debug logging
+    error_log("hikerChoseRefund called - appealId: $appealId, bookingId: $bookingId");
+    
+    // Set appeal to pending_refund - waiting for admin approval
+    $stmt = $conn->prepare("UPDATE appeal SET status = 'pending_refund', updatedAt = NOW() WHERE appealID = ?");
+    $stmt->bind_param("i", $appealId);
     
     if ($stmt->execute()) {
-        $stmt2 = $conn->prepare("UPDATE appeal SET status = 'refunded', updatedAt = NOW() WHERE appealID = ?");
-        $stmt2->bind_param("i", $appealId);
-        $stmt2->execute();
-        
-        return ['success' => true, 'message' => 'Refund confirmed. Payment will be processed within 3 working days.'];
+        $affectedRows = $stmt->affected_rows;
+        error_log("hikerChoseRefund success - affected rows: $affectedRows");
+        return ['success' => true, 'message' => 'Refund request submitted. Waiting for admin approval.', 'affectedRows' => $affectedRows];
     } else {
-        return ['success' => false, 'message' => 'Failed to cancel booking for refund'];
+        error_log("hikerChoseRefund failed - error: " . $stmt->error);
+        return ['success' => false, 'message' => 'Failed to submit refund request: ' . $stmt->error];
     }
 }
 
@@ -276,6 +410,91 @@ function hikerChoseChange($conn, $input) {
         return ['success' => true, 'message' => 'Hiker chose to change guider. Admin can now assign a new guider.'];
     } else {
         return ['success' => false, 'message' => 'Failed to update appeal status'];
+    }
+}
+
+function approveRefund($conn, $input) {
+    error_log("approveRefund called with input: " . print_r($input, true));
+    
+    if (!isset($input['appealId']) || !isset($input['bookingId'])) {
+        error_log("Missing appealId or bookingId");
+        return ['success' => false, 'message' => 'Missing appealId or bookingId'];
+    }
+    
+    $appealId = intval($input['appealId']);
+    $bookingId = intval($input['bookingId']);
+    
+    error_log("Processing: appealId=$appealId, bookingId=$bookingId");
+    
+    // Cancel the booking
+    $stmt = $conn->prepare("UPDATE booking SET status = 'Cancelled' WHERE bookingID = ?");
+    if (!$stmt) {
+        error_log("Prepare failed for booking update: " . $conn->error);
+        return ['success' => false, 'message' => 'Database prepare error: ' . $conn->error];
+    }
+    $stmt->bind_param("i", $bookingId);
+    
+    if ($stmt->execute()) {
+        error_log("Booking updated successfully, affected rows: " . $stmt->affected_rows);
+        
+        // Update appeal status to refunded
+        $stmt2 = $conn->prepare("UPDATE appeal SET status = 'refunded', updatedAt = NOW() WHERE appealID = ?");
+        if (!$stmt2) {
+            error_log("Prepare failed for appeal update: " . $conn->error);
+            return ['success' => false, 'message' => 'Database prepare error for appeal: ' . $conn->error];
+        }
+        $stmt2->bind_param("i", $appealId);
+        
+        if ($stmt2->execute()) {
+            error_log("Appeal updated successfully, affected rows: " . $stmt2->affected_rows);
+            return ['success' => true, 'message' => 'Refund approved. Payment will be processed within 3 working days.'];
+        } else {
+            error_log("Appeal update failed: " . $stmt2->error);
+            return ['success' => false, 'message' => 'Failed to update appeal: ' . $stmt2->error];
+        }
+    } else {
+        error_log("Booking update failed: " . $stmt->error);
+        return ['success' => false, 'message' => 'Failed to approve refund: ' . $stmt->error];
+    }
+}
+
+function rejectRefund($conn, $input) {
+    error_log("rejectRefund called with input: " . print_r($input, true));
+    
+    if (!isset($input['appealId']) || !isset($input['bookingId'])) {
+        error_log("Missing appealId or bookingId");
+        return ['success' => false, 'message' => 'Missing appealId or bookingId'];
+    }
+    
+    $appealId = intval($input['appealId']);
+    $bookingId = intval($input['bookingId']);
+    
+    // Cancel the booking without refund
+    $stmt = $conn->prepare("UPDATE booking SET status = 'Cancelled' WHERE bookingID = ?");
+    if (!$stmt) {
+        error_log("Prepare failed: " . $conn->error);
+        return ['success' => false, 'message' => 'Database prepare error'];
+    }
+    $stmt->bind_param("i", $bookingId);
+    
+    if ($stmt->execute()) {
+        // Update appeal status to rejected
+        $stmt2 = $conn->prepare("UPDATE appeal SET status = 'refund_rejected', updatedAt = NOW() WHERE appealID = ?");
+        if (!$stmt2) {
+            error_log("Prepare failed for appeal: " . $conn->error);
+            return ['success' => false, 'message' => 'Database prepare error for appeal'];
+        }
+        $stmt2->bind_param("i", $appealId);
+        
+        if ($stmt2->execute()) {
+            return ['success' => true, 'message' => 'Refund rejected. Booking has been cancelled without refund.'];
+        } else {
+            error_log("Appeal update failed: " . $stmt2->error);
+            return ['success' => false, 'message' => 'Failed to update appeal'];
+        }
+    } else {
+        error_log("Booking update failed: " . $stmt->error);
+        return ['success' => false, 'message' => 'Failed to reject refund'];
     }
 }
 ?>

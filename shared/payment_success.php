@@ -1,7 +1,12 @@
 <?php
+// TEMPORARY DEBUG - Remove after fixing
+ini_set('display_errors', 1);
+ini_set('display_startup_errors', 1);
+error_reporting(E_ALL);
+
 session_start();
 
-// Check if user is logged in
+// check user dah login ke tak
 if (!isset($_SESSION['hikerID'])) {
     header("Location: HLogin.html");
     exit;
@@ -13,7 +18,7 @@ $billcode = $_GET['billcode'] ?? $_GET['bill_code'] ?? $_GET['billCode'] ?? '';
 $order_id = $_GET['order_id'] ?? $_GET['orderid'] ?? $_GET['refno'] ?? '';
 $bookingID = $_GET['bookingID'] ?? null;
 
-// Check for info messages
+// check untuk info messages
 $info_message = '';
 if (isset($_GET['info'])) {
     switch ($_GET['info']) {
@@ -24,27 +29,30 @@ if (isset($_GET['info'])) {
 }
 
 
-// Database connection
+// connect database
 include 'db_connection.php';
 
+// Include PHPMailer configuration
+require_once __DIR__ . '/email_config.php';
 
-// Check if payment was successful (ToyyibPay returns status_id=1 for success, status_id=3 for failed)
-// First, check if this is a failed payment and redirect immediately
+
+// check payment successful ke tak (ToyyibPay return status_id=1 untuk success, status_id=3 untuk failed)
+// check dulu kalau ni failed payment dan redirect terus
 if ($status == '2' || $status == '3' || $status == 'failed' || $status == '0' || $status == 'cancel' || $status == 'cancelled') {
-    // Payment failed - redirect to failure page
+    // payment failed - redirect ke failure page
     header("Location: payment_failed.php?status=" . urlencode($status) . "&billcode=" . urlencode($billcode) . "&order_id=" . urlencode($order_id));
     exit;
 }
 
 if (($status == '1' || $status == 'success') && !empty($billcode)) {
-    // Update payment transaction status
+    // update payment transaction status
     $updatePaymentQuery = "UPDATE payment_transactions SET status = 'completed', completedAt = NOW() WHERE billCode = ?";
     $stmt = $conn->prepare($updatePaymentQuery);
     $stmt->bind_param("s", $billcode);
     $stmt->execute();
     $stmt->close();
     
-    // Get booking ID from payment transaction
+    // dapat booking ID dari payment transaction
     $getBookingQuery = "SELECT bookingID FROM payment_transactions WHERE billCode = ?";
     $stmt = $conn->prepare($getBookingQuery);
     $stmt->bind_param("s", $billcode);
@@ -56,14 +64,32 @@ if (($status == '1' || $status == 'success') && !empty($billcode)) {
     if ($paymentData) {
         $bookingID = $paymentData['bookingID'];
         
-        // Update booking status to accepted (payment completed)
-        $updateBookingQuery = "UPDATE booking SET status = 'accepted' WHERE bookingID = ? AND hikerID = ?";
-        $stmt = $conn->prepare($updateBookingQuery);
-        $stmt->bind_param("ii", $bookingID, $hikerID);
+        // check kalau ni open group booking
+        $checkGroupQuery = "SELECT groupType FROM booking WHERE bookingID = ?";
+        $stmt = $conn->prepare($checkGroupQuery);
+        $stmt->bind_param("i", $bookingID);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $bookingInfo = $result->fetch_assoc();
+        $stmt->close();
+        
+        // update booking status jadi accepted (payment completed)
+        // untuk open groups, jangan check hikerID sebab participants bukan owner
+        if ($bookingInfo && $bookingInfo['groupType'] === 'open') {
+            // untuk open groups, update booking status je (participants track separately)
+            $updateBookingQuery = "UPDATE booking SET status = 'accepted' WHERE bookingID = ?";
+            $stmt = $conn->prepare($updateBookingQuery);
+            $stmt->bind_param("i", $bookingID);
+        } else {
+            // untuk close groups, verify ownership
+            $updateBookingQuery = "UPDATE booking SET status = 'accepted' WHERE bookingID = ? AND hikerID = ?";
+            $stmt = $conn->prepare($updateBookingQuery);
+            $stmt->bind_param("ii", $bookingID, $hikerID);
+        }
         $stmt->execute();
         $stmt->close();
         
-        // Send payment receipt email
+        // hantar payment receipt email to hiker
         $userQuery = "SELECT username, email FROM hiker WHERE hikerID = ?";
         $stmt = $conn->prepare($userQuery);
         $stmt->bind_param("i", $hikerID);
@@ -76,7 +102,10 @@ if (($status == '1' || $status == 'success') && !empty($billcode)) {
             sendPaymentReceiptEmail($userData['email'], $userData['username'], $bookingID, $billcode, $conn);
         }
         
-        // Fetch booking details for display
+        // Send booking notification email to guider
+        sendGuiderBookingNotificationEmail($bookingID, $conn);
+        
+        // ambil booking details untuk display
         $bookingQuery = "SELECT b.*, g.username, m.name 
                          FROM booking b 
                          JOIN guider g ON b.guiderID = g.guiderID 
@@ -119,14 +148,30 @@ if (($status == '1' || $status == 'success') && !empty($billcode)) {
             $stmt->execute();
             $stmt->close();
             
+            // Check if this is an open group booking
+            $checkGroupQuery = "SELECT groupType FROM booking WHERE bookingID = ?";
+            $stmt = $conn->prepare($checkGroupQuery);
+            $stmt->bind_param("i", $paymentData['bookingID']);
+            $stmt->execute();
+            $result = $stmt->get_result();
+            $bookingInfo = $result->fetch_assoc();
+            $stmt->close();
+            
             // Update booking status
-            $updateBookingQuery = "UPDATE booking SET status = 'accepted' WHERE bookingID = ? AND hikerID = ?";
-            $stmt = $conn->prepare($updateBookingQuery);
-            $stmt->bind_param("ii", $paymentData['bookingID'], $hikerID);
+            // For open groups, don't check hikerID since participants aren't the owner
+            if ($bookingInfo && $bookingInfo['groupType'] === 'open') {
+                $updateBookingQuery = "UPDATE booking SET status = 'accepted' WHERE bookingID = ?";
+                $stmt = $conn->prepare($updateBookingQuery);
+                $stmt->bind_param("i", $paymentData['bookingID']);
+            } else {
+                $updateBookingQuery = "UPDATE booking SET status = 'accepted' WHERE bookingID = ? AND hikerID = ?";
+                $stmt = $conn->prepare($updateBookingQuery);
+                $stmt->bind_param("ii", $paymentData['bookingID'], $hikerID);
+            }
             $stmt->execute();
             $stmt->close();
             
-            // Send email
+            // Send email to hiker
             $userQuery = "SELECT username, email FROM hiker WHERE hikerID = ?";
             $stmt = $conn->prepare($userQuery);
             $stmt->bind_param("i", $hikerID);
@@ -138,6 +183,9 @@ if (($status == '1' || $status == 'success') && !empty($billcode)) {
             if ($userData && !empty($userData['email'])) {
                 sendPaymentReceiptEmail($userData['email'], $userData['username'], $paymentData['bookingID'], $billcode, $conn);
             }
+            
+            // Send booking notification email to guider
+            sendGuiderBookingNotificationEmail($paymentData['bookingID'], $conn);
             
             $success = true;
             $bookingData = $paymentData;
@@ -155,8 +203,8 @@ $conn->close();
 
 // Function to send payment receipt email
 function sendPaymentReceiptEmail($email, $username, $bookingID, $billcode, $conn) {
-    // Get booking details for email
-    $bookingQuery = "SELECT b.*, g.username, m.name 
+    // Get booking details for email with guider contact info
+    $bookingQuery = "SELECT b.*, g.username as guiderName, g.phone_number as guiderPhone, g.email as guiderEmail, m.name as mountainName, m.location as mountainLocation
                      FROM booking b 
                      JOIN guider g ON b.guiderID = g.guiderID 
                      JOIN mountain m ON b.mountainID = m.mountainID 
@@ -170,159 +218,458 @@ function sendPaymentReceiptEmail($email, $username, $bookingID, $billcode, $conn
     
     if (!$booking) return;
     
+    // Calculate trip duration
+    $startDate = new DateTime($booking['startDate']);
+    $endDate = new DateTime($booking['endDate']);
+    $tripDuration = $startDate->diff($endDate)->days + 1;
+    $tripDurationText = $tripDuration == 1 ? '1 Day' : $tripDuration . ' Days';
+    
+    // Format dates nicely
+    $formattedStartDate = date('l, F j, Y', strtotime($booking['startDate']));
+    $formattedEndDate = date('l, F j, Y', strtotime($booking['endDate']));
+    $paymentDate = date('F j, Y \a\t g:i A');
+    
     // Email content
-    $subject = "Payment Receipt - Hiking Booking #$bookingID";
+    $subject = "✅ Booking Confirmed - " . htmlspecialchars($booking['mountainName']) . " | Booking #$bookingID";
     
     $message = "
     <!DOCTYPE html>
     <html>
     <head>
         <meta charset='UTF-8'>
-        <title>Payment Receipt - Hiking Booking Confirmation</title>
-        <style>
-            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; margin: 0; padding: 0; }
-            .container { max-width: 650px; margin: 0 auto; padding: 20px; }
-            .header { background: linear-gradient(135deg, #1e40af, #3b82f6); color: white; padding: 30px 20px; text-align: center; border-radius: 15px 15px 0 0; }
-            .content { background: #f8fafc; padding: 30px; border-radius: 0 0 15px 15px; }
-            .appreciation { background: linear-gradient(135deg, #f0fdf4, #dcfce7); border: 2px solid #22c55e; border-radius: 12px; padding: 20px; margin: 20px 0; text-align: center; }
-            .booking-details { background: white; padding: 25px; border-radius: 12px; margin: 20px 0; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-            .detail-row { display: flex; justify-content: space-between; margin: 12px 0; padding: 8px 0; border-bottom: 1px solid #e5e7eb; }
-            .detail-label { font-weight: 600; color: #374151; }
-            .detail-value { color: #1e40af; font-weight: 500; }
-            .total { background: linear-gradient(135deg, #10b981, #059669); color: white; padding: 20px; border-radius: 12px; text-align: center; font-size: 20px; font-weight: bold; margin: 20px 0; }
-            .notification-box { background: #eff6ff; border-left: 4px solid #3b82f6; padding: 20px; margin: 20px 0; border-radius: 8px; }
-            .next-steps { background: #fef3c7; border: 1px solid #f59e0b; border-radius: 12px; padding: 20px; margin: 20px 0; }
-            .footer { text-align: center; margin-top: 30px; color: #6b7280; font-size: 14px; }
-            .btn { display: inline-block; background: #1e40af; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; margin: 10px 5px; font-weight: 600; }
-            .btn:hover { background: #1e3a8a; color: white; }
-        </style>
+        <meta name='viewport' content='width=device-width, initial-scale=1.0'>
+        <title>Booking Confirmation - Hiking Guidance System</title>
     </head>
-    <body>
-        <div class='container'>
-            <div class='header'>
-                <h1 style='margin: 0; font-size: 28px;'>🏔️ Payment Successful!</h1>
-                <p style='margin: 10px 0 0 0; font-size: 16px; opacity: 0.9;'>Your hiking adventure is confirmed!</p>
-            </div>
-            
-            <div class='content'>
-                <div class='appreciation'>
-                    <h2 style='color: #059669; margin: 0 0 10px 0; font-size: 24px;'>🎉 Thank You, $username!</h2>
-                    <p style='margin: 0; font-size: 16px; color: #047857;'>
-                        We're absolutely thrilled that you've chosen to embark on this amazing hiking adventure with us! 
-                        Your payment has been successfully processed, and we can't wait to make this experience unforgettable for you.
-                    </p>
-                </div>
-                
-                <p style='font-size: 16px; color: #374151;'>
-                    <strong>Dear $username,</strong><br><br>
-                    Thank you for trusting us with your hiking journey! Your booking has been confirmed and you're all set for an incredible adventure in the mountains.
-                </p>
-                
-                <div class='booking-details'>
-                    <h3 style='color: #1e40af; margin: 0 0 20px 0; font-size: 20px; text-align: center;'>📋 Your Booking Confirmation</h3>
-                    <div class='detail-row'>
-                        <span class='detail-label'>Booking ID:</span>
-                        <span class='detail-value'>#$bookingID</span>
-                    </div>
-                    <div class='detail-row'>
-                        <span class='detail-label'>Mountain:</span>
-                        <span class='detail-value'>" . htmlspecialchars($booking['name']) . "</span>
-                    </div>
-                    <div class='detail-row'>
-                        <span class='detail-label'>Your Guider:</span>
-                        <span class='detail-value'>" . htmlspecialchars($booking['username']) . "</span>
-                    </div>
-                    <div class='detail-row'>
-                        <span class='detail-label'>Start Date:</span>
-                        <span class='detail-value'>" . date('M j, Y', strtotime($booking['startDate'])) . "</span>
-                    </div>
-                    <div class='detail-row'>
-                        <span class='detail-label'>End Date:</span>
-                        <span class='detail-value'>" . date('M j, Y', strtotime($booking['endDate'])) . "</span>
-                    </div>
-                    <div class='detail-row'>
-                        <span class='detail-label'>Number of Hikers:</span>
-                        <span class='detail-value'>" . $booking['totalHiker'] . " person(s)</span>
-                    </div>
-                    <div class='detail-row'>
-                        <span class='detail-label'>Meeting Location:</span>
-                        <span class='detail-value'>" . htmlspecialchars($booking['location']) . "</span>
-                    </div>
-                    <div class='detail-row'>
-                        <span class='detail-label'>Payment Reference:</span>
-                        <span class='detail-value'>$billcode</span>
-                    </div>
-                </div>
-                
-                <div class='total'>
-                    💰 Total Amount Paid: RM " . number_format($booking['price'], 2) . "
-                </div>
-                
-                <div class='notification-box'>
-                    <h4 style='color: #1e40af; margin: 0 0 10px 0;'>🔔 Important Notifications</h4>
-                    <ul style='margin: 0; padding-left: 20px;'>
-                        <li>Your guider will contact you within 24 hours to discuss trip details</li>
-                        <li>You'll receive a detailed itinerary and packing list via email</li>
-                        <li>Weather updates will be sent 48 hours before your trip</li>
-                        <li>Emergency contact information will be provided closer to the date</li>
-                    </ul>
-                </div>
-                
-                <div class='next-steps'>
-                    <h4 style='color: #92400e; margin: 0 0 15px 0;'>🎯 What's Next?</h4>
-                    <ul style='margin: 0; padding-left: 20px; color: #92400e;'>
-                        <li><strong>Prepare for Adventure:</strong> Check our recommended gear list</li>
-                        <li><strong>Stay Connected:</strong> Your guider will reach out soon</li>
-                        <li><strong>Health Check:</strong> Ensure you're physically ready for hiking</li>
-                        <li><strong>Questions?</strong> Don't hesitate to contact us anytime</li>
-                    </ul>
-                </div>
-                
-                <div style='text-align: center; margin: 30px 0;'>
-                    <a href='http://localhost/HGS/hiker/HYourGuider.php' class='btn'>View Your Bookings</a>
-                    <a href='http://localhost/HGS/hiker/HBooking.php' class='btn' style='background: #059669;'>Book Another Trip</a>
-                </div>
-                
-                <p style='font-size: 16px; color: #374151; text-align: center; margin: 20px 0;'>
-                    <strong>We're genuinely excited to be part of your hiking journey!</strong><br>
-                    Thank you for choosing Hiking Guidance System. We promise to make this an experience you'll treasure forever.
-                </p>
-            </div>
-            
-            <div class='footer'>
-                <p style='margin: 0;'><strong>Best regards,</strong><br>
-                The Hiking Guidance System Team</p>
-                <p style='margin: 10px 0 0 0; font-size: 12px;'>
-                    This is an automated confirmation email. Please save this receipt for your records.<br>
-                    © 2024 Hiking Guidance System - Making Every Adventure Memorable
-                </p>
-            </div>
-        </div>
+    <body style='font-family: Arial, Helvetica, sans-serif; line-height: 1.6; color: #333; margin: 0; padding: 0; background-color: #f5f5f5;'>
+        <table width='100%' cellpadding='0' cellspacing='0' style='background-color: #f5f5f5; padding: 20px 0;'>
+            <tr>
+                <td align='center'>
+                    <table width='600' cellpadding='0' cellspacing='0' style='background-color: #ffffff; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.1);'>
+                        
+                        <!-- Header -->
+                        <tr>
+                            <td style='background: linear-gradient(135deg, #1e40af, #3b82f6); color: white; padding: 30px; text-align: center;'>
+                                <h1 style='margin: 0; font-size: 26px;'>🏔️ Booking Confirmed!</h1>
+                                <p style='margin: 10px 0 0 0; font-size: 16px; opacity: 0.9;'>Your hiking adventure awaits</p>
+                            </td>
+                        </tr>
+                        
+                        <!-- Main Content -->
+                        <tr>
+                            <td style='padding: 30px;'>
+                                
+                                <!-- Success Banner -->
+                                <table width='100%' cellpadding='15' style='background-color: #f0fdf4; border: 2px solid #22c55e; border-radius: 10px; margin-bottom: 25px;'>
+                                    <tr>
+                                        <td style='text-align: center;'>
+                                            <h2 style='color: #059669; margin: 0 0 10px 0; font-size: 22px;'>🎉 Thank You, $username!</h2>
+                                            <p style='margin: 0; font-size: 15px; color: #047857;'>
+                                                Your payment has been successfully processed and your hiking trip is now confirmed!
+                                            </p>
+                                        </td>
+                                    </tr>
+                                </table>
+                                
+                                <!-- Booking Summary Box -->
+                                <table width='100%' cellpadding='0' cellspacing='0' style='background-color: #f8fafc; border-radius: 10px; margin-bottom: 25px; border: 1px solid #e2e8f0;'>
+                                    <tr>
+                                        <td style='padding: 20px;'>
+                                            <h3 style='color: #1e40af; margin: 0 0 20px 0; font-size: 18px; border-bottom: 2px solid #3b82f6; padding-bottom: 10px;'>📋 BOOKING DETAILS</h3>
+                                            
+                                            <table width='100%' cellpadding='8' cellspacing='0'>
+                                                <tr>
+                                                    <td style='color: #6b7280; font-weight: 600; width: 40%;'>Booking Reference:</td>
+                                                    <td style='color: #1e40af; font-weight: 700; font-size: 16px;'>#$bookingID</td>
+                                                </tr>
+                                                <tr style='background-color: #ffffff;'>
+                                                    <td style='color: #6b7280; font-weight: 600;'>Mountain:</td>
+                                                    <td style='color: #111827; font-weight: 600;'>" . htmlspecialchars($booking['mountainName']) . "</td>
+                                                </tr>
+                                                <tr>
+                                                    <td style='color: #6b7280; font-weight: 600;'>Location:</td>
+                                                    <td style='color: #111827;'>" . htmlspecialchars($booking['mountainLocation']) . "</td>
+                                                </tr>
+                                                <tr style='background-color: #ffffff;'>
+                                                    <td style='color: #6b7280; font-weight: 600;'>Trip Duration:</td>
+                                                    <td style='color: #111827; font-weight: 600;'>$tripDurationText</td>
+                                                </tr>
+                                                <tr>
+                                                    <td style='color: #6b7280; font-weight: 600;'>Start Date:</td>
+                                                    <td style='color: #111827;'>$formattedStartDate</td>
+                                                </tr>
+                                                <tr style='background-color: #ffffff;'>
+                                                    <td style='color: #6b7280; font-weight: 600;'>End Date:</td>
+                                                    <td style='color: #111827;'>$formattedEndDate</td>
+                                                </tr>
+                                                <tr>
+                                                    <td style='color: #6b7280; font-weight: 600;'>Number of Hikers:</td>
+                                                    <td style='color: #111827;'>" . $booking['totalHiker'] . " person(s)</td>
+                                                </tr>
+                                                <tr style='background-color: #ffffff;'>
+                                                    <td style='color: #6b7280; font-weight: 600;'>Group Type:</td>
+                                                    <td style='color: #111827;'>" . ucfirst($booking['groupType']) . " Group</td>
+                                                </tr>
+                                                <tr>
+                                                    <td style='color: #6b7280; font-weight: 600;'>Meeting Point:</td>
+                                                    <td style='color: #111827;'>" . htmlspecialchars($booking['location']) . "</td>
+                                                </tr>
+                                            </table>
+                                        </td>
+                                    </tr>
+                                </table>
+                                
+                                <!-- Guider Info Box -->
+                                <table width='100%' cellpadding='0' cellspacing='0' style='background-color: #eff6ff; border-radius: 10px; margin-bottom: 25px; border: 1px solid #bfdbfe;'>
+                                    <tr>
+                                        <td style='padding: 20px;'>
+                                            <h3 style='color: #1e40af; margin: 0 0 15px 0; font-size: 18px;'>👤 YOUR GUIDER</h3>
+                                            
+                                            <table width='100%' cellpadding='8' cellspacing='0'>
+                                                <tr>
+                                                    <td style='color: #6b7280; font-weight: 600; width: 40%;'>Name:</td>
+                                                    <td style='color: #111827; font-weight: 600;'>" . htmlspecialchars($booking['guiderName']) . "</td>
+                                                </tr>
+                                                <tr>
+                                                    <td style='color: #6b7280; font-weight: 600;'>Phone Number:</td>
+                                                    <td style='color: #1e40af; font-weight: 600;'>" . htmlspecialchars($booking['guiderPhone'] ?? 'Will be provided') . "</td>
+                                                </tr>
+                                                <tr>
+                                                    <td style='color: #6b7280; font-weight: 600;'>Email:</td>
+                                                    <td style='color: #1e40af;'>" . htmlspecialchars($booking['guiderEmail']) . "</td>
+                                                </tr>
+                                            </table>
+                                            
+                                            <p style='margin: 15px 0 0 0; font-size: 13px; color: #4b5563; font-style: italic;'>
+                                                💡 Your guider will contact you within 24 hours to discuss trip details.
+                                            </p>
+                                        </td>
+                                    </tr>
+                                </table>
+                                
+                                <!-- Payment Summary -->
+                                <table width='100%' cellpadding='0' cellspacing='0' style='background: linear-gradient(135deg, #059669, #10b981); border-radius: 10px; margin-bottom: 25px;'>
+                                    <tr>
+                                        <td style='padding: 20px; text-align: center; color: white;'>
+                                            <h3 style='margin: 0 0 10px 0; font-size: 16px; opacity: 0.9;'>💳 PAYMENT SUMMARY</h3>
+                                            <p style='margin: 0; font-size: 28px; font-weight: 700;'>RM " . number_format($booking['price'], 2) . "</p>
+                                            <p style='margin: 10px 0 0 0; font-size: 13px; opacity: 0.8;'>
+                                                Reference: $billcode<br>
+                                                Paid on: $paymentDate
+                                            </p>
+                                        </td>
+                                    </tr>
+                                </table>
+                                
+                                <!-- CTA Buttons -->
+                                <table width='100%' cellpadding='0' cellspacing='0' style='margin-bottom: 25px;'>
+                                    <tr>
+                                        <td align='center'>
+                                            <a href='http://localhost/HGS/hiker/HYourGuider.php' style='display: inline-block; background-color: #1e40af; color: white; padding: 14px 28px; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 15px; margin: 5px;'>View My Booking</a>
+                                            <a href='http://localhost/HGS/hiker/HBooking.php' style='display: inline-block; background-color: #059669; color: white; padding: 14px 28px; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 15px; margin: 5px;'>Book Another Trip</a>
+                                        </td>
+                                    </tr>
+                                </table>
+                                
+                                <p style='font-size: 15px; color: #374151; text-align: center; margin: 0;'>
+                                    We're excited to be part of your hiking adventure!<br>
+                                    <strong>See you on the mountain! 🥾</strong>
+                                </p>
+                                
+                            </td>
+                        </tr>
+                        
+                        <!-- Footer -->
+                        <tr>
+                            <td style='background-color: #f8fafc; padding: 25px; text-align: center; border-top: 1px solid #e2e8f0;'>
+                                <p style='margin: 0 0 10px 0; color: #374151; font-weight: 600;'>Hiking Guidance System</p>
+                                <p style='margin: 0; font-size: 12px; color: #6b7280;'>
+                                    This is an automated email. Please save this receipt for your records.<br>
+                                    © " . date('Y') . " Hiking Guidance System. All rights reserved.
+                                </p>
+                            </td>
+                        </tr>
+                        
+                    </table>
+                </td>
+            </tr>
+        </table>
     </body>
     </html>
     ";
     
-    // Email headers
-    $headers = "MIME-Version: 1.0" . "\r\n";
-    $headers .= "Content-type:text/html;charset=UTF-8" . "\r\n";
-    $headers .= "From: Hiking Guidance System <noreply@hgs.com>" . "\r\n";
-    $headers .= "Reply-To: noreply@hgs.com" . "\r\n";
+    // Send email using PHPMailer
+    $mailSent = sendEmail($email, $subject, $message, $username);
     
-    // Try to send email with error handling
-    try {
-        // For development, we'll just log the email content instead of actually sending
-        error_log("=== PAYMENT RECEIPT EMAIL ===");
-        error_log("To: $email");
-        error_log("Subject: $subject");
-        error_log("Message: " . substr($message, 0, 200) . "...");
-        error_log("===============================");
-        
-        // In production, you would use a proper email service like PHPMailer
-        // For now, we'll simulate successful email sending
+    if ($mailSent) {
+        error_log("Booking confirmation email sent successfully to: $email for booking #$bookingID");
         return true;
-        
-    } catch (Exception $e) {
-        error_log("Email sending error: " . $e->getMessage());
+    } else {
+        error_log("Failed to send booking confirmation email to: $email for booking #$bookingID");
+        return false;
+    }
+}
+
+// Function to send booking notification email to guider
+function sendGuiderBookingNotificationEmail($bookingID, $conn) {
+    // Get booking details with hiker and guider information including phone numbers
+    $bookingQuery = "SELECT b.*, g.username as guiderUsername, g.email as guiderEmail, 
+                            h.username as hikerUsername, h.email as hikerEmail, h.phone_number as hikerPhone,
+                            m.name as mountainName, m.location as mountainLocation
+                     FROM booking b 
+                     JOIN guider g ON b.guiderID = g.guiderID 
+                     JOIN hiker h ON b.hikerID = h.hikerID
+                     JOIN mountain m ON b.mountainID = m.mountainID 
+                     WHERE b.bookingID = ?";
+    $stmt = $conn->prepare($bookingQuery);
+    $stmt->bind_param("i", $bookingID);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $booking = $result->fetch_assoc();
+    $stmt->close();
+    
+    if (!$booking || empty($booking['guiderEmail'])) {
+        error_log("Failed to get guider email for booking #$bookingID - booking or guider email not found");
+        return false;
+    }
+    
+    // Get hiker details from bookinghikerdetails table (emergency contact info)
+    $hikerDetailsQuery = "SELECT hikerName, phoneNumber, emergencyContactName, emergencyContactNumber 
+                          FROM bookinghikerdetails WHERE bookingID = ? LIMIT 1";
+    $stmt = $conn->prepare($hikerDetailsQuery);
+    $stmt->bind_param("i", $bookingID);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $hikerDetails = $result->fetch_assoc();
+    $stmt->close();
+    
+    $guiderEmail = $booking['guiderEmail'];
+    $guiderUsername = $booking['guiderUsername'];
+    $hikerUsername = $booking['hikerUsername'];
+    $mountainName = $booking['mountainName'];
+    
+    // Calculate trip duration
+    $startDate = new DateTime($booking['startDate']);
+    $endDate = new DateTime($booking['endDate']);
+    $tripDuration = $startDate->diff($endDate)->days + 1;
+    $tripDurationText = $tripDuration == 1 ? '1 Day' : $tripDuration . ' Days';
+    
+    // Format dates
+    $formattedStartDate = date('l, F j, Y', strtotime($booking['startDate']));
+    $formattedEndDate = date('l, F j, Y', strtotime($booking['endDate']));
+    $bookingDate = date('F j, Y \a\t g:i A');
+    
+    // Email content for guider
+    $subject = "🎉 New Booking Received - " . htmlspecialchars($mountainName) . " | #$bookingID";
+    
+    $message = "
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset='UTF-8'>
+        <meta name='viewport' content='width=device-width, initial-scale=1.0'>
+        <title>New Booking Notification - Hiking Guidance System</title>
+    </head>
+    <body style='font-family: Arial, Helvetica, sans-serif; line-height: 1.6; color: #333; margin: 0; padding: 0; background-color: #f5f5f5;'>
+        <table width='100%' cellpadding='0' cellspacing='0' style='background-color: #f5f5f5; padding: 20px 0;'>
+            <tr>
+                <td align='center'>
+                    <table width='600' cellpadding='0' cellspacing='0' style='background-color: #ffffff; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.1);'>
+                        
+                        <!-- Header -->
+                        <tr>
+                            <td style='background: linear-gradient(135deg, #059669, #10b981); color: white; padding: 30px; text-align: center;'>
+                                <h1 style='margin: 0; font-size: 26px;'>🎉 New Booking Received!</h1>
+                                <p style='margin: 10px 0 0 0; font-size: 16px; opacity: 0.9;'>You have a new hiking trip assignment</p>
+                            </td>
+                        </tr>
+                        
+                        <!-- Main Content -->
+                        <tr>
+                            <td style='padding: 30px;'>
+                                
+                                <!-- Notification Banner -->
+                                <table width='100%' cellpadding='15' style='background-color: #eff6ff; border: 2px solid #3b82f6; border-radius: 10px; margin-bottom: 25px;'>
+                                    <tr>
+                                        <td style='text-align: center;'>
+                                            <h2 style='color: #1e40af; margin: 0 0 10px 0; font-size: 22px;'>Hello, $guiderUsername!</h2>
+                                            <p style='margin: 0; font-size: 15px; color: #1e3a8a;'>
+                                                Great news! A hiker has booked your services and payment has been confirmed.<br>
+                                                Please review the details below and prepare for the adventure!
+                                            </p>
+                                        </td>
+                                    </tr>
+                                </table>
+                                
+                                <!-- Trip Summary Box -->
+                                <table width='100%' cellpadding='0' cellspacing='0' style='background-color: #f8fafc; border-radius: 10px; margin-bottom: 25px; border: 1px solid #e2e8f0;'>
+                                    <tr>
+                                        <td style='padding: 20px;'>
+                                            <h3 style='color: #059669; margin: 0 0 20px 0; font-size: 18px; border-bottom: 2px solid #10b981; padding-bottom: 10px;'>📋 TRIP DETAILS</h3>
+                                            
+                                            <table width='100%' cellpadding='8' cellspacing='0'>
+                                                <tr>
+                                                    <td style='color: #6b7280; font-weight: 600; width: 40%;'>Booking Reference:</td>
+                                                    <td style='color: #059669; font-weight: 700; font-size: 16px;'>#$bookingID</td>
+                                                </tr>
+                                                <tr style='background-color: #ffffff;'>
+                                                    <td style='color: #6b7280; font-weight: 600;'>Mountain:</td>
+                                                    <td style='color: #111827; font-weight: 600;'>" . htmlspecialchars($mountainName) . "</td>
+                                                </tr>
+                                                <tr>
+                                                    <td style='color: #6b7280; font-weight: 600;'>Location:</td>
+                                                    <td style='color: #111827;'>" . htmlspecialchars($booking['mountainLocation']) . "</td>
+                                                </tr>
+                                                <tr style='background-color: #ffffff;'>
+                                                    <td style='color: #6b7280; font-weight: 600;'>Trip Duration:</td>
+                                                    <td style='color: #111827; font-weight: 600;'>$tripDurationText</td>
+                                                </tr>
+                                                <tr>
+                                                    <td style='color: #6b7280; font-weight: 600;'>Start Date:</td>
+                                                    <td style='color: #111827;'>$formattedStartDate</td>
+                                                </tr>
+                                                <tr style='background-color: #ffffff;'>
+                                                    <td style='color: #6b7280; font-weight: 600;'>End Date:</td>
+                                                    <td style='color: #111827;'>$formattedEndDate</td>
+                                                </tr>
+                                                <tr>
+                                                    <td style='color: #6b7280; font-weight: 600;'>Number of Hikers:</td>
+                                                    <td style='color: #111827;'>" . $booking['totalHiker'] . " person(s)</td>
+                                                </tr>
+                                                <tr style='background-color: #ffffff;'>
+                                                    <td style='color: #6b7280; font-weight: 600;'>Group Type:</td>
+                                                    <td style='color: #111827;'>" . ucfirst($booking['groupType']) . " Group</td>
+                                                </tr>
+                                                <tr>
+                                                    <td style='color: #6b7280; font-weight: 600;'>Meeting Point:</td>
+                                                    <td style='color: #111827;'>" . htmlspecialchars($booking['location']) . "</td>
+                                                </tr>
+                                            </table>
+                                        </td>
+                                    </tr>
+                                </table>
+                                
+                                <!-- Hiker Information Box -->
+                                <table width='100%' cellpadding='0' cellspacing='0' style='background-color: #fef3c7; border-radius: 10px; margin-bottom: 25px; border: 1px solid #fcd34d;'>
+                                    <tr>
+                                        <td style='padding: 20px;'>
+                                            <h3 style='color: #92400e; margin: 0 0 15px 0; font-size: 18px;'>👤 HIKER INFORMATION</h3>
+                                            
+                                            <table width='100%' cellpadding='8' cellspacing='0'>
+                                                <tr>
+                                                    <td style='color: #78350f; font-weight: 600; width: 40%;'>Name:</td>
+                                                    <td style='color: #111827; font-weight: 600;'>" . htmlspecialchars($hikerDetails['hikerName'] ?? $hikerUsername) . "</td>
+                                                </tr>
+                                                <tr>
+                                                    <td style='color: #78350f; font-weight: 600;'>Email:</td>
+                                                    <td style='color: #1e40af;'>" . htmlspecialchars($booking['hikerEmail']) . "</td>
+                                                </tr>
+                                                <tr>
+                                                    <td style='color: #78350f; font-weight: 600;'>Phone Number:</td>
+                                                    <td style='color: #059669; font-weight: 600;'>" . htmlspecialchars($hikerDetails['phoneNumber'] ?? $booking['hikerPhone'] ?? 'Not provided') . "</td>
+                                                </tr>
+                                            </table>
+                                        </td>
+                                    </tr>
+                                </table>
+                                
+                                <!-- Emergency Contact Box -->
+                                <table width='100%' cellpadding='0' cellspacing='0' style='background-color: #fee2e2; border-radius: 10px; margin-bottom: 25px; border: 1px solid #fca5a5;'>
+                                    <tr>
+                                        <td style='padding: 20px;'>
+                                            <h3 style='color: #991b1b; margin: 0 0 15px 0; font-size: 18px;'>🆘 EMERGENCY CONTACT</h3>
+                                            
+                                            <table width='100%' cellpadding='8' cellspacing='0'>
+                                                <tr>
+                                                    <td style='color: #7f1d1d; font-weight: 600; width: 40%;'>Contact Name:</td>
+                                                    <td style='color: #111827; font-weight: 600;'>" . htmlspecialchars($hikerDetails['emergencyContactName'] ?? 'Not provided') . "</td>
+                                                </tr>
+                                                <tr>
+                                                    <td style='color: #7f1d1d; font-weight: 600;'>Contact Number:</td>
+                                                    <td style='color: #dc2626; font-weight: 600;'>" . htmlspecialchars($hikerDetails['emergencyContactNumber'] ?? 'Not provided') . "</td>
+                                                </tr>
+                                            </table>
+                                            
+                                            <p style='margin: 15px 0 0 0; font-size: 12px; color: #991b1b; font-style: italic;'>
+                                                ⚠️ Please save this emergency contact information for safety purposes.
+                                            </p>
+                                        </td>
+                                    </tr>
+                                </table>
+                                
+                                <!-- Earnings Summary -->
+                                <table width='100%' cellpadding='0' cellspacing='0' style='background: linear-gradient(135deg, #059669, #10b981); border-radius: 10px; margin-bottom: 25px;'>
+                                    <tr>
+                                        <td style='padding: 20px; text-align: center; color: white;'>
+                                            <h3 style='margin: 0 0 10px 0; font-size: 16px; opacity: 0.9;'>💰 YOUR EARNINGS</h3>
+                                            <p style='margin: 0; font-size: 28px; font-weight: 700;'>RM " . number_format($booking['price'], 2) . "</p>
+                                            <p style='margin: 10px 0 0 0; font-size: 13px; opacity: 0.8;'>
+                                                Booking confirmed on: $bookingDate
+                                            </p>
+                                        </td>
+                                    </tr>
+                                </table>
+                                
+                                <!-- Action Required Box -->
+                                <table width='100%' cellpadding='15' style='background-color: #eff6ff; border-left: 4px solid #3b82f6; border-radius: 0 10px 10px 0; margin-bottom: 25px;'>
+                                    <tr>
+                                        <td>
+                                            <h4 style='color: #1e40af; margin: 0 0 12px 0; font-size: 16px;'>✅ ACTION REQUIRED</h4>
+                                            <ul style='margin: 0; padding-left: 20px; color: #1e3a8a; font-size: 14px;'>
+                                                <li style='margin-bottom: 8px;'><strong>Contact the hiker within 24 hours</strong> to introduce yourself</li>
+                                                <li style='margin-bottom: 8px;'><strong>Confirm meeting time and exact location</strong> for the trip day</li>
+                                                <li style='margin-bottom: 8px;'><strong>Share your contact number</strong> with the hiker</li>
+                                                <li style='margin-bottom: 8px;'><strong>Discuss any special requirements</strong> or health conditions</li>
+                                                <li><strong>Prepare itinerary and safety briefing</strong> materials</li>
+                                            </ul>
+                                        </td>
+                                    </tr>
+                                </table>
+                                
+                                <!-- CTA Buttons -->
+                                <table width='100%' cellpadding='0' cellspacing='0' style='margin-bottom: 25px;'>
+                                    <tr>
+                                        <td align='center'>
+                                            <a href='http://localhost/HGS/guider/GBooking.php' style='display: inline-block; background-color: #059669; color: white; padding: 14px 28px; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 15px; margin: 5px;'>View Booking Details</a>
+                                            <a href='http://localhost/HGS/guider/GHistory.php' style='display: inline-block; background-color: #1e40af; color: white; padding: 14px 28px; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 15px; margin: 5px;'>My Booking History</a>
+                                        </td>
+                                    </tr>
+                                </table>
+                                
+                                <p style='font-size: 15px; color: #374151; text-align: center; margin: 0;'>
+                                    Thank you for being an amazing guide!<br>
+                                    <strong>Let's make this adventure unforgettable! 🏔️</strong>
+                                </p>
+                                
+                            </td>
+                        </tr>
+                        
+                        <!-- Footer -->
+                        <tr>
+                            <td style='background-color: #f8fafc; padding: 25px; text-align: center; border-top: 1px solid #e2e8f0;'>
+                                <p style='margin: 0 0 10px 0; color: #374151; font-weight: 600;'>Hiking Guidance System</p>
+                                <p style='margin: 0; font-size: 12px; color: #6b7280;'>
+                                    This is an automated notification. Log in to your account for more details.<br>
+                                    © " . date('Y') . " Hiking Guidance System. All rights reserved.
+                                </p>
+                            </td>
+                        </tr>
+                        
+                    </table>
+                </td>
+            </tr>
+        </table>
+    </body>
+    </html>
+    ";
+    
+    // Send email using PHPMailer
+    $mailSent = sendEmail($guiderEmail, $subject, $message, $guiderUsername);
+    
+    if ($mailSent) {
+        error_log("Booking notification email sent successfully to guider: $guiderEmail for booking #$bookingID");
+        return true;
+    } else {
+        error_log("Failed to send booking notification email to guider: $guiderEmail for booking #$bookingID");
         return false;
     }
 }

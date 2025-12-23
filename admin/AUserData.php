@@ -77,9 +77,9 @@ try {
                     END
             END as status
         FROM (
-            SELECT hikerID as userID, username, email, 'hiker' as user_type, status as account_status FROM hiker
+            SELECT hikerID as userID, username, email, 'hiker' as user_type, status as account_status FROM hiker WHERE status != 'deleted'
             UNION ALL
-            SELECT guiderID as userID, username, email, 'guider' as user_type, status as account_status FROM guider
+            SELECT guiderID as userID, username, email, 'guider' as user_type, status as account_status FROM guider WHERE status != 'deleted'
         ) u
         LEFT JOIN guider g ON u.userID = g.guiderID AND u.user_type = 'guider'
     ";
@@ -105,12 +105,12 @@ try {
         $users[] = $row;
     }
     
-    // Get user counts by type
+    // Get user counts by type (excluding deleted users)
     $count_query = "
         SELECT 
-            'hiker' as user_type, COUNT(*) as count FROM hiker
+            'hiker' as user_type, COUNT(*) as count FROM hiker WHERE status != 'deleted'
             UNION ALL
-            SELECT 'guider' as user_type, COUNT(*) as count FROM guider
+            SELECT 'guider' as user_type, COUNT(*) as count FROM guider WHERE status != 'deleted'
     ";
     
     $count_result = $conn->query($count_query);

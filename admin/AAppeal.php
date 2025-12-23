@@ -1,7 +1,7 @@
 <?php
 session_start();
 
-// Redirect to login if not logged in
+// kalau tak login, hantar ke login page
 if (!isset($_SESSION['email'])) {
     header("Location: ALogin.html");
     exit();
@@ -9,7 +9,7 @@ if (!isset($_SESSION['email'])) {
 
 include '../shared/db_connection.php';
 
-// Verify the email belongs to an admin
+// check email ni admin ke tak
 $email = $_SESSION['email'];
 $stmt = $conn->prepare("SELECT * FROM admin WHERE email = ?");
 $stmt->bind_param("s", $email);
@@ -22,7 +22,7 @@ if ($result->num_rows === 0) {
     exit();
 }
 
-// Fetch appeals with search
+// ambil appeals dengan search
 $whereConditions = [];
 $params = [];
 $types = [];
@@ -53,15 +53,15 @@ if (!empty($params)) {
 $stmt->execute();
 $appeals = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 
-// Debug: Show appeal data structure
+// debug: tunjuk struktur data appeal
 if (empty($appeals)) {
-    // Check if there are any appeals at all
+    // check ada appeals ke tak
     $debugQuery = "SELECT COUNT(*) as total FROM appeal";
     $debugResult = $conn->query($debugQuery);
     $debugCount = $debugResult->fetch_assoc()['total'];
     
     if ($debugCount > 0) {
-        // Show sample appeal data
+        // tunjuk sample appeal data
         $sampleQuery = "SELECT * FROM appeal LIMIT 1";
         $sampleResult = $conn->query($sampleQuery);
         $sampleAppeal = $sampleResult->fetch_assoc();
@@ -703,18 +703,18 @@ if (empty($appeals)) {
   </style>
 </head>
 <body>
-  <!-- Mobile Overlay -->
+  <!-- ni overlay mobile -->
   <div class="mobile-overlay" onclick="closeMobileMenu()"></div>
 
-  <!-- Header -->
+  <!-- ni header -->
   <header>
     <nav class="navbar">
       <div class="container d-flex align-items-center">
-        <!-- Hamburger inside header (mobile only) -->
+        <!-- hamburger dalam header (mobile je) -->
         <button class="mobile-menu-btn me-2" onclick="toggleMobileMenu()">
           <i class="bi bi-list"></i>
         </button>
-        <a class="navbar-brand d-flex align-items-center" href="../index.html">
+        <a class="navbar-brand d-flex align-items-center" href="../index.php">
           <img src="../img/logo.png" class="img-fluid logo me-2" alt="HGS Logo" style="width: 50px; height: 50px;">
           <span class="fs-6 fw-bold text-white">Admin</span>
         </a>
@@ -722,9 +722,9 @@ if (empty($appeals)) {
       </div>
     </nav>
   </header>
-  <!-- End Header -->
+  <!-- habis header -->
   <div class="wrapper">
-    <!-- Sidebar -->
+    <!-- ni sidebar -->
     <div class="sidebar">
       <div class="logo-admin">
         <strong class="ms-2 text-white">Menu</strong>
@@ -734,6 +734,7 @@ if (empty($appeals)) {
         <a href="AUser.html"><i class="bi bi-people-fill"></i> User</a>
         <a href="AMountain.php"><i class="bi bi-triangle-fill"></i> Mountain</a>
         <a href="AAppeal.php" class="active"><i class="bi bi-chat-dots-fill"></i> Appeal</a>
+        <a href="ASentimentReport.php"><i class="fas fa-chart-line"></i> Sentiment Analysis</a>
         <a href="AReport.php"><i class="bi bi-file-earmark-text-fill"></i> Reports</a>
         <div class="text-center mt-4">
           <form action="../shared/logout.php" method="POST" class="d-flex justify-content-center">
@@ -752,20 +753,6 @@ if (empty($appeals)) {
         </div>
       <div class="tab-container">
         <div class="mb-3 fw-bold fs-5">Appeal List</div>
-        
-        <?php if (empty($appeals)): ?>
-          <div class="alert alert-info">
-            <h5><i class="bi bi-info-circle me-2"></i>No Appeals Found</h5>
-            <p>There are currently no appeals in the system.</p>
-            <p><strong>To test the new action buttons:</strong></p>
-            <ol>
-              <li>Create a booking as a hiker</li>
-              <li>Submit an appeal from the hiker side</li>
-              <li>Or submit an appeal from the guider side</li>
-              <li>Then return to this page to see the action buttons</li>
-            </ol>
-          </div>
-        <?php endif; ?>
         <div class="search-bar">
           <div class="filter-label">
             <i class="bi bi-search me-2"></i>Search Appeals
@@ -828,7 +815,9 @@ if (empty($appeals)) {
                           case 'approved': $badgeClass = 'primary'; break;
                           case 'awaiting_hiker_choice': $badgeClass = 'info'; break;
                           case 'onhold': $badgeClass = 'info'; break;
-                          case 'refunded': $badgeClass = 'warning'; break;
+                          case 'pending_refund': $badgeClass = 'warning'; break;
+                          case 'refunded': $badgeClass = 'success'; break;
+                          case 'refund_rejected': $badgeClass = 'danger'; break;
                           case 'resolved': $badgeClass = 'secondary'; break;
                           case 'rejected': $badgeClass = 'danger'; break;
                           default: $badgeClass = 'secondary';
@@ -844,9 +833,9 @@ if (empty($appeals)) {
                           <i class="bi bi-eye"></i> View
                         </button>
                         <?php if ($appeal['status'] == 'pending'): ?>
-                          <!-- Guider Appeal Actions -->
+                          <!-- action untuk guider appeal -->
                           <?php if ($appeal['guiderID'] && !$appeal['hikerID']): ?>
-                            <button class="btn-accept btn-action" onclick="acceptGuiderAppeal(<?= $appeal['appealID'] ?>, <?= $appeal['bookingID'] ?>)">
+                            <button class="btn-accept btn-action" onclick="acceptGuiderAppeal(<?= $appeal['appealID'] ?>, <?= $appeal['bookingID'] ?>, '<?= htmlspecialchars($appeal['appealType']) ?>')">
                               <i class="bi bi-check-circle"></i> Accept
                             </button>
                             <button class="btn-reject btn-action" onclick="rejectGuiderAppeal(<?= $appeal['appealID'] ?>)">
@@ -854,7 +843,7 @@ if (empty($appeals)) {
                             </button>
                           <?php endif; ?>
                           
-                          <!-- Hiker Appeal Actions -->
+                          <!-- action untuk hiker appeal -->
                           <?php if ($appeal['hikerID'] && !$appeal['guiderID']): ?>
                             <button class="btn-accept btn-action" onclick="acceptHikerAppeal(<?= $appeal['appealID'] ?>, <?= $appeal['bookingID'] ?>)">
                               <i class="bi bi-check-circle"></i> Accept
@@ -864,21 +853,28 @@ if (empty($appeals)) {
                             </button>
                           <?php endif; ?>
                         <?php elseif ($appeal['status'] == 'awaiting_hiker_choice'): ?>
-                          <!-- Waiting for hiker to choose refund or change guider -->
+                          <!-- tunggu hiker pilih refund atau tukar guider -->
                           <span class="text-muted small">
                             <i class="bi bi-clock me-1"></i>Waiting for hiker choice
                           </span>
                         <?php elseif ($appeal['status'] == 'approved'): ?>
-                          <!-- Approved: show only the default View button (no extra actions) -->
+                          <!-- dah approved: tunjuk button View je (tak payah extra actions) -->
                           <span class="text-muted small"><i class="bi bi-info-circle me-1"></i>Approved</span>
                         <?php elseif ($appeal['status'] == 'onhold'): ?>
-                          <?php if (($appeal['hikerID'] && !$appeal['guiderID']) && (isset($appeal['appealType']) && $appeal['appealType'] === 'change')): ?>
+                          <?php if (isset($appeal['appealType']) && $appeal['appealType'] === 'change'): ?>
                             <button class="btn-change-guider btn-action" onclick="changeGuider(<?= $appeal['appealID'] ?>, <?= $appeal['bookingID'] ?>)">
                               <i class="bi bi-person-plus"></i> Change Guider
                             </button>
                           <?php else: ?>
                             <span class="text-muted small"><i class="bi bi-clock me-1"></i>Awaiting admin action</span>
                           <?php endif; ?>
+                        <?php elseif ($appeal['status'] == 'pending_refund'): ?>
+                          <button class="btn-accept btn-action" onclick="approveRefund(<?= $appeal['appealID'] ?>, <?= $appeal['bookingID'] ?>)">
+                            <i class="bi bi-check-circle"></i> Approve
+                          </button>
+                          <button class="btn-reject btn-action" onclick="rejectRefund(<?= $appeal['appealID'] ?>, <?= $appeal['bookingID'] ?>)">
+                            <i class="bi bi-x-circle"></i> Reject
+                          </button>
                         <?php elseif ($appeal['status'] == 'refunded'): ?>
                           <span class="text-warning fw-semibold d-flex align-items-center gap-1">
                             <i class="bi bi-currency-dollar"></i>
@@ -894,6 +890,11 @@ if (empty($appeals)) {
                             <i class="bi bi-x-circle"></i>
                             Rejected — booking continues as scheduled
                           </span>
+                        <?php elseif ($appeal['status'] == 'refund_rejected'): ?>
+                          <span class="text-danger fw-semibold d-flex align-items-center gap-1">
+                            <i class="bi bi-x-circle"></i>
+                            Refund Rejected — booking cancelled without refund
+                          </span>
                         <?php endif; ?>
                       </div>
                     </td>
@@ -908,7 +909,7 @@ if (empty($appeals)) {
     </div>
   </div>
   <script>
-    // Mobile sidebar controls
+    // control sidebar mobile
     function toggleMobileMenu() {
       const sidebarEl = document.querySelector('.sidebar');
       const overlayEl = document.querySelector('.mobile-overlay');
@@ -927,23 +928,23 @@ if (empty($appeals)) {
       document.body.style.overflow = 'auto';
     }
 
-    // Expose to inline onclick handlers
+    // expose untuk inline onclick handlers
     window.toggleMobileMenu = toggleMobileMenu;
     window.closeMobileMenu = closeMobileMenu;
 
-    // Close on ESC key
+    // tutup kalau tekan ESC
     document.addEventListener('keydown', function(e) {
       if (e.key === 'Escape') {
         closeMobileMenu();
       }
     });
 
-    // Close when any sidebar link is clicked
+    // tutup kalau klik link sidebar mana-mana
     document.querySelectorAll('.sidebar .menu a').forEach(function(a) {
       a.addEventListener('click', closeMobileMenu);
     });
 
-    // Date formatting function
+    // function untuk format tarikh
     function formatDateDDMMYYYY(dateString) {
       if (!dateString) return 'N/A';
       const date = new Date(dateString);
@@ -953,9 +954,9 @@ if (empty($appeals)) {
       return `${day}/${month}/${year}`;
     }
 
-    // Appeal management functions
+    // function manage appeals
     function viewAppeal(appealId) {
-      // Fetch appeal details
+      // ambil detail appeal
       fetch('get_appeal_details.php', {
         method: 'POST',
         headers: {
@@ -986,7 +987,7 @@ if (empty($appeals)) {
     function displayAppealModal(appeal) {
       console.log('Displaying appeal modal with data:', appeal);
       
-      // Helper function to safely set element content
+      // helper function untuk set element content dengan selamat
       function setElementContent(id, content) {
         const element = document.getElementById(id);
         if (element) {
@@ -1005,14 +1006,14 @@ if (empty($appeals)) {
         }
       }
       
-      // Populate modal with appeal data
+      // isi modal dengan data appeal
       setElementContent('viewAppealId', appeal.appealID || 'N/A');
       setElementContent('viewBookingId', appeal.bookingID || 'N/A');
       setElementContent('viewAppealType', appeal.appealType || 'N/A');
       setElementContent('viewReason', appeal.reason || 'No reason provided');
       setElementContent('viewCreatedAt', appeal.createdAt ? formatDateDDMMYYYY(appeal.createdAt) : 'N/A');
       
-      // Set status badge color
+      // set warna status badge
       const statusBadge = document.getElementById('viewStatusBadge');
       if (statusBadge) {
         let badgeClass = 'danger';
@@ -1024,7 +1025,7 @@ if (empty($appeals)) {
         statusBadge.textContent = appeal.status ? appeal.status.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase()) : 'Unknown';
       }
       
-      // Show hiker/guider info
+      // tunjuk info hiker/guider
       if (appeal.hiker_name) {
         setElementHTML('viewHikerInfo', `
           <div class="mb-2">
@@ -1051,7 +1052,7 @@ if (empty($appeals)) {
         if (guiderSection) guiderSection.style.display = 'block';
       }
       
-      // Show booking details
+      // tunjuk detail booking
       if (appeal.startDate && appeal.endDate) {
         let bookingHtml = `
           <div class="mb-2">
@@ -1082,15 +1083,29 @@ if (empty($appeals)) {
         if (bookingSection) bookingSection.style.display = 'none';
       }
       
-      // Show modal using Bootstrap's vanilla JavaScript API
+      // tunjuk modal guna Bootstrap vanilla JavaScript API
       const modal = new bootstrap.Modal(document.getElementById('viewAppealModal'));
       modal.show();
     }
 
-    // Guider Appeal Actions
-    function acceptGuiderAppeal(appealId, bookingId) {
-      if (confirm('Accept this guider appeal? This will allow the guider to cancel the booking.')) {
-        // Update appeal status to Accepted
+    // action untuk guider appeal
+    function acceptGuiderAppeal(appealId, bookingId, appealType) {
+      let confirmMessage = '';
+      let successMessage = '';
+      
+      if (appealType === 'cancellation') {
+        confirmMessage = 'Accept this guider cancellation request? The booking will be CANCELLED immediately.';
+        successMessage = 'Guider cancellation accepted! The booking has been cancelled.';
+      } else if (appealType === 'change') {
+        confirmMessage = 'Accept this guider change request? The booking will be put on hold for hiker to choose.';
+        successMessage = 'Guider change request accepted! Waiting for hiker to choose.';
+      } else {
+        confirmMessage = 'Accept this guider appeal?';
+        successMessage = 'Guider appeal accepted!';
+      }
+      
+      if (confirm(confirmMessage)) {
+        // update status appeal jadi Accepted
         fetch('process_appeal.php', {
           method: 'POST',
           headers: {
@@ -1105,7 +1120,7 @@ if (empty($appeals)) {
         .then(response => response.json())
         .then(data => {
           if (data.success) {
-            alert('Guider appeal accepted! The guider can now cancel the booking.');
+            alert(successMessage);
             location.reload();
           } else {
             alert('Error: ' + data.message);
@@ -1146,7 +1161,7 @@ if (empty($appeals)) {
       }
     }
 
-    // Hiker Appeal Actions
+    // action untuk hiker appeal
     function acceptHikerAppeal(appealId, bookingId) {
       if (confirm('Accept this hiker appeal? The hiker can now choose refund or change guider.')) {
         fetch('process_appeal.php', {
@@ -1204,7 +1219,7 @@ if (empty($appeals)) {
       }
     }
 
-    // Post-Accept Actions
+    // action lepas accept
     function cancelBooking(bookingId) {
       if (confirm('Cancel this booking? This action cannot be undone.')) {
         fetch('process_appeal.php', {
@@ -1249,16 +1264,16 @@ if (empty($appeals)) {
         .then(response => response.json())
         .then(data => {
           if (data.success) {
-            // Update the row in-place: badge + actions
+            // update row terus: badge + actions
             const row = document.querySelector(`tr[data-appeal-id="${appealId}"]`);
             if (row) {
-              // Update status badge cell (7th column index-wise => td:nth-child(7))
+              // update status badge cell (column ke-7 => td:nth-child(7))
               const statusCell = row.querySelector('td:nth-child(7) .badge');
               if (statusCell) {
                 statusCell.className = 'badge bg-warning';
                 statusCell.textContent = 'Refunded';
               }
-              // Replace actions cell (8th column) with refunded message
+              // replace actions cell (column ke-8) dengan mesej refunded
               const actionsCell = row.querySelector('td:nth-child(8) .d-flex');
               if (actionsCell) {
                 actionsCell.innerHTML = `
@@ -1269,7 +1284,7 @@ if (empty($appeals)) {
                 `;
               }
             }
-            // Optional toast
+            // optional toast
             alert('Refund marked successfully.');
           } else {
             alert('Error: ' + data.message);
@@ -1282,16 +1297,74 @@ if (empty($appeals)) {
       }
     }
 
+    function approveRefund(appealId, bookingId) {
+      if (confirm('Approve this refund request? The booking will be cancelled and payment will be processed within 3 working days.')) {
+        fetch('process_appeal.php', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            action: 'approve_refund',
+            appealId: appealId,
+            bookingId: bookingId
+          })
+        })
+        .then(response => response.json())
+        .then(data => {
+          if (data.success) {
+            alert('Refund approved successfully! Payment will be processed within 3 working days.');
+            location.reload();
+          } else {
+            alert('Error: ' + data.message);
+          }
+        })
+        .catch(error => {
+          console.error('Error:', error);
+          alert('An error occurred while approving the refund.');
+        });
+      }
+    }
+
+    function rejectRefund(appealId, bookingId) {
+      if (confirm('Reject this refund request? The booking will be cancelled WITHOUT refund.')) {
+        fetch('process_appeal.php', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            action: 'reject_refund',
+            appealId: appealId,
+            bookingId: bookingId
+          })
+        })
+        .then(response => response.json())
+        .then(data => {
+          if (data.success) {
+            alert('Refund rejected. Booking has been cancelled without refund.');
+            location.reload();
+          } else {
+            alert('Error: ' + data.message);
+          }
+        })
+        .catch(error => {
+          console.error('Error:', error);
+          alert('An error occurred while rejecting the refund.');
+        });
+      }
+    }
+
     function changeGuider(appealId, bookingId) {
-      // Open modal to select new guider
+      // buka modal untuk pilih guider baru
       const modal = new bootstrap.Modal(document.getElementById('changeGuiderModal'));
       modal.show();
       
-      // Store appeal and booking IDs for later use
+      // simpan appeal dan booking IDs untuk guna nanti
       document.getElementById('changeGuiderModal').dataset.appealId = appealId;
       document.getElementById('changeGuiderModal').dataset.bookingId = bookingId;
       
-      // Load available guiders for the booking dates
+      // load guiders yang available untuk tarikh booking tu
       loadAvailableGuiders(bookingId);
     }
 
@@ -1352,17 +1425,17 @@ if (empty($appeals)) {
     }
 
     function selectGuider(cardEl, guiderId) {
-      // Remove previous selection
+      // buang pilihan sebelum ni
       document.querySelectorAll('.guider-card').forEach(card => {
         card.classList.remove('border-primary', 'bg-light');
       });
       
-      // Add selection to clicked card
+      // tambah selection pada card yang diklik
       if (cardEl) {
         cardEl.classList.add('border-primary', 'bg-light');
       }
       
-      // Enable confirm button
+      // enable button confirm
       document.getElementById('confirmChangeGuider').disabled = false;
       document.getElementById('confirmChangeGuider').onclick = function() {
         confirmGuiderChange(guiderId);
@@ -1404,7 +1477,7 @@ if (empty($appeals)) {
     }
   </script>
 
-  <!-- View Appeal Modal -->
+  <!-- modal view appeal -->
   <div class="modal fade" id="viewAppealModal" tabindex="-1" aria-labelledby="viewAppealModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-lg">
       <div class="modal-content">
@@ -1475,7 +1548,7 @@ if (empty($appeals)) {
     </div>
   </div>
 
-  <!-- Change Guider Modal -->
+  <!-- modal tukar guider -->
   <div class="modal fade" id="changeGuiderModal" tabindex="-1" aria-labelledby="changeGuiderModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-lg">
       <div class="modal-content">

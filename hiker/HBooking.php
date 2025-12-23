@@ -67,13 +67,13 @@ if ($startDate && $endDate) {
 
     if (!empty($availableGuiderIDs)) {
         $guiderFilter = implode(",", $availableGuiderIDs);
-        $sql = "SELECT guiderID, username, price, profile_picture, skills, experience, about, average_rating, total_reviews FROM guider WHERE status = 'active' AND guiderID IN ($guiderFilter)";
+        $sql = "SELECT guiderID, username, price, profile_picture, skills, experience, about, mountains, average_rating, total_reviews FROM guider WHERE status = 'active' AND guiderID IN ($guiderFilter)";
     } else {
         $sql = null;
     }
 } else {
     // Default list only active guiders
-    $sql = "SELECT guiderID, username, price, profile_picture, skills, experience, about, average_rating, total_reviews FROM guider WHERE status = 'active'";
+    $sql = "SELECT guiderID, username, price, profile_picture, skills, experience, about, mountains, average_rating, total_reviews FROM guider WHERE status = 'active'";
 }
 
 $result = ($sql) ? $conn->query($sql) : null;
@@ -344,6 +344,15 @@ function getRemainingQuota($conn, $guiderID, $startDate, $endDate) {
 
     .mountain-text {
       font-size: 0.85rem;
+    }
+
+    .guider-profile-img {
+      transition: transform 0.3s ease, box-shadow 0.3s ease;
+    }
+    
+    .guider-profile-img:hover {
+      transform: scale(1.1);
+      box-shadow: 0 8px 25px rgba(30, 64, 175, 0.4) !important;
     }
 
     .guider-rating {
@@ -954,7 +963,7 @@ function getRemainingQuota($conn, $guiderID, $startDate, $endDate) {
         <span class="navbar-toggler-icon"></span>
       </button>
       <h1 class="navbar-title text-white mx-auto">HIKING GUIDANCE SYSTEM</h1>
-      <a class="navbar-brand" href="../index.html">
+      <a class="navbar-brand" href="../index.php">
         <img src="../img/logo.png" class="img-fluid logo" alt="HGS Logo">
       </a>
     </div>
@@ -981,6 +990,8 @@ function getRemainingQuota($conn, $guiderID, $startDate, $endDate) {
     </div>
   </nav>
 </header>
+
+<?php include_once '../shared/suspension_banner.php'; ?>
 
 <!-- Suspension Banner (for suspended hikers) -->
 <?php if ($isSuspended): ?>
@@ -1017,6 +1028,17 @@ function getRemainingQuota($conn, $guiderID, $startDate, $endDate) {
       <h1 class="section-title">BOOK YOUR GUIDER</h1>
       <p class="section-subtitle">Find experienced hiking guides for your next adventure</p>
     </div>
+    
+    <!-- Permit Notice -->
+    <div class="permit-notice" style="background: linear-gradient(135deg, #fef3c7, #fde68a); border: 2px solid #f59e0b; border-radius: 12px; padding: 1rem 1.5rem; margin-bottom: 1.5rem; display: flex; align-items: flex-start; gap: 1rem;">
+      <i class="fas fa-exclamation-triangle" style="color: #d97706; font-size: 1.5rem; margin-top: 0.25rem;"></i>
+      <div>
+        <strong style="color: #92400e; font-size: 1rem;">Important: Permit Fee Not Included</strong>
+        <p style="margin: 0.5rem 0 0 0; color: #78350f; font-size: 0.9rem; line-height: 1.5;">
+          Your booking payment covers the guider service only. A <strong>permit fee of RM10 per person</strong> is required and must be paid directly at guider on the day of your hike. Please bring exact change for a smoother experience.
+        </p>
+      </div>
+    </div>
 
     <!-- Search and Filter Card -->
     <div class="search-card">
@@ -1051,6 +1073,7 @@ function getRemainingQuota($conn, $guiderID, $startDate, $endDate) {
           $experience = htmlspecialchars($row['experience'] ?? 'Experience not specified');
           $skills = htmlspecialchars($row['skills'] ?? 'Skills not specified');
           $about = htmlspecialchars($row['about'] ?? 'No additional information provided');
+          $mountains = htmlspecialchars($row['mountains'] ?? '');
           
           // Get rating data
           $averageRating = $row['average_rating'] ?? 0;
@@ -1084,6 +1107,104 @@ function getRemainingQuota($conn, $guiderID, $startDate, $endDate) {
 
           // Get remaining quota for this guider on the selected dates
           $quotaData = getRemainingQuota($conn, $guiderID, $startDate, $endDate);
+          
+          // Fetch reviews for this guider
+          $reviewsData = [];
+          $reviewStmt = $conn->prepare("
+              SELECT r.rating, r.comment, r.createdAt, h.username as hikerName, m.name as mountainName
+              FROM review r
+              JOIN booking b ON r.bookingID = b.bookingID
+              JOIN hiker h ON r.hikerID = h.hikerID
+              JOIN mountain m ON b.mountainID = m.mountainID
+              WHERE r.guiderID = ?
+              ORDER BY r.createdAt DESC
+              LIMIT 10
+          ");
+          $reviewStmt->bind_param('i', $guiderID);
+          $reviewStmt->execute();
+          $reviewResult = $reviewStmt->get_result();
+          while ($reviewRow = $reviewResult->fetch_assoc()) {
+              $reviewsData[] = $reviewRow;
+          }
+          $reviewStmt->close();
+          
+          // Fetch schedule data: off days + bookings for this guider (next 60 days)
+          $scheduleData = [];
+          
+          // Get off days
+          $offDaysStmt = $conn->prepare("
+              SELECT offDate, 'offday' as type, NULL as slotsLeft, NULL as mountainName
+              FROM schedule 
+              WHERE guiderID = ? AND offDate >= CURDATE() AND offDate <= DATE_ADD(CURDATE(), INTERVAL 60 DAY)
+              ORDER BY offDate ASC
+          ");
+          $offDaysStmt->bind_param('i', $guiderID);
+          $offDaysStmt->execute();
+          $offDaysResult = $offDaysStmt->get_result();
+          while ($row = $offDaysResult->fetch_assoc()) {
+              $scheduleData[$row['offDate']] = [
+                  'type' => 'offday',
+                  'reason' => 'Off Day',
+                  'slotsLeft' => null,
+                  'mountainName' => null
+              ];
+          }
+          $offDaysStmt->close();
+          
+          // Get bookings (close group = fully booked, open group = show slots)
+          $bookingStmt = $conn->prepare("
+              SELECT b.startDate, b.endDate, b.groupType, b.totalHiker, m.name as mountainName
+              FROM booking b
+              LEFT JOIN mountain m ON b.mountainID = m.mountainID
+              WHERE b.guiderID = ? 
+              AND b.endDate >= CURDATE() 
+              AND b.startDate <= DATE_ADD(CURDATE(), INTERVAL 60 DAY)
+              AND b.status IN ('pending', 'accepted', 'paid')
+              ORDER BY b.startDate ASC
+          ");
+          $bookingStmt->bind_param('i', $guiderID);
+          $bookingStmt->execute();
+          $bookingResult = $bookingStmt->get_result();
+          
+          while ($booking = $bookingResult->fetch_assoc()) {
+              $start = new DateTime($booking['startDate']);
+              $end = new DateTime($booking['endDate']);
+              $end->modify('+1 day'); // Include end date
+              
+              $interval = new DateInterval('P1D');
+              $period = new DatePeriod($start, $interval, $end);
+              
+              foreach ($period as $date) {
+                  $dateStr = $date->format('Y-m-d');
+                  if ($dateStr < date('Y-m-d')) continue; // Skip past dates
+                  
+                  if ($booking['groupType'] === 'close') {
+                      // Close group = fully booked
+                      $scheduleData[$dateStr] = [
+                          'type' => 'booked',
+                          'reason' => 'Booked (Private)',
+                          'slotsLeft' => 0,
+                          'mountainName' => $booking['mountainName']
+                      ];
+                  } else {
+                      // Open group = show available slots
+                      $slotsLeft = 7 - (int)$booking['totalHiker'];
+                      if (!isset($scheduleData[$dateStr]) || $scheduleData[$dateStr]['type'] !== 'booked') {
+                          $scheduleData[$dateStr] = [
+                              'type' => 'open',
+                              'reason' => 'Open Group',
+                              'slotsLeft' => max(0, $slotsLeft),
+                              'mountainName' => $booking['mountainName']
+                          ];
+                      }
+                  }
+              }
+          }
+          $bookingStmt->close();
+          
+          // Sort by date
+          ksort($scheduleData);
+          
           $quotaDisplay = '';
           $mountainDisplay = '';
           // Determine if user can join an existing open group (forming window + not full)
@@ -1120,7 +1241,7 @@ function getRemainingQuota($conn, $guiderID, $startDate, $endDate) {
                 <div class="guider-card">
                     <img src="' . $image . '" class="rounded-circle" style="width:80px;height:80px;object-fit:cover" alt="' . $name . '">
                     <h5 class="guider-name">' . $name . '</h5>
-                    <p class="guider-price">RM ' . $price . ' / person</p>
+                    <p class="guider-price">RM ' . $price . ' / trip</p>
                     ' . $quotaDisplay . '
                     ' . $mountainDisplay . '
                     ' . $ratingDisplay . '
@@ -1156,11 +1277,16 @@ function getRemainingQuota($conn, $guiderID, $startDate, $endDate) {
                         <div class="modal-body">
                             <div class="row">
                                 <div class="col-md-4 text-center">
-                                    <img src="' . $image . '" class="rounded-circle mb-3" style="width:120px;height:120px;object-fit:cover;border:4px solid var(--guider-blue-soft)">
+                                    <img src="' . $image . '" class="rounded-circle mb-3 guider-profile-img" style="width:120px;height:120px;object-fit:cover;border:4px solid var(--guider-blue-soft); cursor: pointer;" onclick="openImageModal(\'' . $image . '\', \'' . addslashes($name) . '\')" title="Click to view full image">
                                     <h4 style="color: var(--guider-blue-dark);">' . $name . '</h4>
-                                    <h5 style="color: var(--guider-blue);">RM ' . $price . ' / person</h5>
+                                    <h5 style="color: var(--guider-blue);">RM ' . $price . ' / group</h5>
                                 </div>
                                 <div class="col-md-8">
+                                    <h5 style="color: var(--guider-blue-dark); margin-bottom: 1rem;">
+                                        <i class="fas fa-info-circle me-2"></i>About
+                                    </h5>
+                                    <p style="color: #64748b; margin-bottom: 1.5rem;">' . $about . '</p>
+                                    
                                     <h5 style="color: var(--guider-blue-dark); margin-bottom: 1rem;">
                                         <i class="fas fa-mountain me-2"></i>Experience
                                     </h5>
@@ -1178,9 +1304,78 @@ function getRemainingQuota($conn, $guiderID, $startDate, $endDate) {
                                     </div>
                                     
                                     <h5 style="color: var(--guider-blue-dark); margin-bottom: 1rem;">
-                                        <i class="fas fa-info-circle me-2"></i>About
+                                        <i class="fas fa-mountain me-2"></i>Mountains Conquered
                                     </h5>
-                                    <p style="color: #64748b;">' . $about . '</p>
+                                    <div class="d-flex flex-wrap gap-2 mb-3">
+                                        ' . (!empty($mountains) ? 
+                                            implode('', array_map(function($mountain) {
+                                                return '<span class="badge" style="background: linear-gradient(135deg, var(--guider-blue), var(--guider-blue-light)); color: white; padding: 0.5rem 1rem; border-radius: 20px;"><i class="fas fa-mountain me-1"></i>' . trim($mountain) . '</span>';
+                                            }, explode(',', $mountains))) : 
+                                            '<span class="badge" style="background: linear-gradient(135deg, #6b7280, #9ca3af); color: white; padding: 0.5rem 1rem; border-radius: 20px;">No mountains specified</span>') . '
+                                    </div>
+                                    
+                                    <!-- Reviews Section -->
+                                    <h5 style="color: var(--guider-blue-dark); margin-bottom: 1rem; margin-top: 1.5rem;">
+                                        <i class="fas fa-comments me-2"></i>Reviews & Comments
+                                    </h5>
+                                    <div class="reviews-preview" style="background: #f8fafc; border-radius: 12px; padding: 1rem;">
+                                        ' . (count($reviewsData) > 0 ? '
+                                        <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+                                            <div style="font-size: 2rem; font-weight: 700; color: var(--guider-blue-dark);">' . number_format($averageRating, 1) . '</div>
+                                            <div>
+                                                <div class="guider-rating" style="margin-bottom: 0.25rem;">
+                                                    ' . (function() use ($averageRating) {
+                                                        $stars = "";
+                                                        for ($i = 1; $i <= 5; $i++) {
+                                                            if ($i <= $averageRating) {
+                                                                $stars .= "<i class=\"fas fa-star\"></i>";
+                                                            } elseif ($i - 0.5 <= $averageRating) {
+                                                                $stars .= "<i class=\"fas fa-star-half-alt\"></i>";
+                                                            } else {
+                                                                $stars .= "<i class=\"far fa-star\"></i>";
+                                                            }
+                                                        }
+                                                        return $stars;
+                                                    })() . '
+                                                </div>
+                                                <div style="font-size: 0.85rem; color: #64748b;">' . $totalReviews . ' reviews</div>
+                                            </div>
+                                        </div>
+                                        <button type="button" class="btn w-100" style="background: linear-gradient(135deg, var(--guider-blue), var(--guider-blue-light)); color: white; border: none; border-radius: 10px; padding: 0.75rem;" data-bs-toggle="modal" data-bs-target="#reviewsModal' . $guiderID . '" data-bs-dismiss="modal">
+                                            <i class="fas fa-comments me-2"></i>View All Reviews (' . $totalReviews . ')
+                                        </button>
+                                        ' : '
+                                        <div style="text-align: center; padding: 1rem; color: #64748b;">
+                                            <i class="fas fa-comment-slash" style="font-size: 2rem; margin-bottom: 0.5rem; opacity: 0.5;"></i>
+                                            <p style="margin: 0;">No reviews yet</p>
+                                        </div>
+                                        ') . '
+                                    </div>
+                                    
+                                    <!-- Schedule Section -->
+                                    <h5 style="color: var(--guider-blue-dark); margin-bottom: 1rem; margin-top: 1.5rem;">
+                                        <i class="fas fa-calendar-alt me-2"></i>Schedule (Next 60 Days)
+                                    </h5>
+                                    <div class="schedule-preview" style="background: linear-gradient(135deg, #f0f9ff, #e0f2fe); border-radius: 12px; padding: 1rem;">
+                                        ' . (count($scheduleData) > 0 ? '
+                                        <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+                                            <div style="font-size: 2rem; color: var(--guider-blue-dark);"><i class="fas fa-calendar-check"></i></div>
+                                            <div>
+                                                <div style="font-weight: 600; color: var(--guider-blue-dark);">' . count($scheduleData) . ' day' . (count($scheduleData) > 1 ? 's' : '') . ' with activity</div>
+                                                <div style="font-size: 0.85rem; color: #64748b;">View availability and booking status</div>
+                                            </div>
+                                        </div>
+                                        <button type="button" class="btn w-100" style="background: linear-gradient(135deg, var(--guider-blue), var(--guider-blue-light)); color: white; border: none; border-radius: 10px; padding: 0.75rem;" data-bs-toggle="modal" data-bs-target="#scheduleModal' . $guiderID . '" data-bs-dismiss="modal">
+                                            <i class="fas fa-calendar-alt me-2"></i>View Full Schedule
+                                        </button>
+                                        ' : '
+                                        <div style="text-align: center; padding: 1rem; color: #16a34a;">
+                                            <i class="fas fa-calendar-check" style="font-size: 2rem; margin-bottom: 0.5rem; opacity: 0.7;"></i>
+                                            <p style="margin: 0; font-weight: 500;">Fully Available</p>
+                                            <p style="margin: 0; font-size: 0.85rem; color: #22c55e;">No bookings or off days scheduled</p>
+                                        </div>
+                                        ') . '
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -1197,6 +1392,161 @@ function getRemainingQuota($conn, $guiderID, $startDate, $endDate) {
                                 <i class="fas fa-calendar-check me-2"></i>' . (($canJoinOpen && $quotaData !== null) ? 'Join Open Group' : 'Book This Guide') . '
                               </button>
                             </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Reviews Modal for this guider -->
+            <div class="modal fade" id="reviewsModal' . $guiderID . '" tabindex="-1" aria-hidden="true">
+                <div class="modal-dialog modal-lg modal-dialog-scrollable">
+                    <div class="modal-content">
+                        <div class="modal-header" style="background: linear-gradient(135deg, var(--guider-blue-dark), var(--guider-blue)); color: white;">
+                            <h5 class="modal-title">
+                                <i class="fas fa-comments me-2"></i>Reviews for ' . $name . '
+                            </h5>
+                            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                        </div>
+                        <div class="modal-body" style="max-height: 60vh; overflow-y: auto;">
+                            ' . (count($reviewsData) > 0 ? '
+                            <div class="reviews-summary mb-4 p-3" style="background: linear-gradient(135deg, #f0f9ff, #e0f2fe); border-radius: 12px; text-align: center;">
+                                <div style="font-size: 3rem; font-weight: 700; color: var(--guider-blue-dark);">' . number_format($averageRating, 1) . '</div>
+                                <div class="guider-rating mb-2" style="font-size: 1.5rem;">
+                                    ' . (function() use ($averageRating) {
+                                        $stars = "";
+                                        for ($i = 1; $i <= 5; $i++) {
+                                            if ($i <= $averageRating) {
+                                                $stars .= "<i class=\"fas fa-star\"></i>";
+                                            } elseif ($i - 0.5 <= $averageRating) {
+                                                $stars .= "<i class=\"fas fa-star-half-alt\"></i>";
+                                            } else {
+                                                $stars .= "<i class=\"far fa-star\"></i>";
+                                            }
+                                        }
+                                        return $stars;
+                                    })() . '
+                                </div>
+                                <div style="color: #64748b;">Based on ' . $totalReviews . ' reviews</div>
+                            </div>
+                            <div class="reviews-list">
+                                ' . implode("", array_map(function($review) {
+                                    $reviewStars = "";
+                                    for ($i = 1; $i <= 5; $i++) {
+                                        $reviewStars .= $i <= $review["rating"] ? "<i class=\"fas fa-star\" style=\"color: #f59e0b;\"></i>" : "<i class=\"far fa-star\" style=\"color: #d1d5db;\"></i>";
+                                    }
+                                    $comment = !empty($review["comment"]) ? htmlspecialchars($review["comment"]) : "<em style=\"color: #9ca3af;\">No comment provided</em>";
+                                    $date = date("M j, Y", strtotime($review["createdAt"]));
+                                    return "
+                                    <div class=\"review-item\" style=\"background: #f8fafc; border-radius: 12px; padding: 1rem; margin-bottom: 1rem; border-left: 4px solid var(--guider-blue);\">
+                                        <div style=\"display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;\">
+                                            <div style=\"font-weight: 600; color: var(--guider-blue-dark);\">
+                                                <i class=\"fas fa-user-circle me-2\"></i>" . htmlspecialchars($review["hikerName"]) . "
+                                            </div>
+                                            <div style=\"font-size: 0.85rem; color: #64748b;\">" . $date . "</div>
+                                        </div>
+                                        <div style=\"margin-bottom: 0.5rem;\">" . $reviewStars . "</div>
+                                        <div style=\"color: #374151; line-height: 1.6;\">" . $comment . "</div>
+                                        <div style=\"font-size: 0.8rem; color: #9ca3af; margin-top: 0.5rem;\">
+                                            <i class=\"fas fa-mountain me-1\"></i>" . htmlspecialchars($review["mountainName"]) . "
+                                        </div>
+                                    </div>";
+                                }, $reviewsData)) . '
+                            </div>
+                            ' : '
+                            <div style="text-align: center; padding: 3rem; color: #64748b;">
+                                <i class="fas fa-comment-slash" style="font-size: 4rem; margin-bottom: 1rem; opacity: 0.3;"></i>
+                                <h5>No Reviews Yet</h5>
+                                <p>This guide hasn\'t received any reviews yet. Be the first to book and leave a review!</p>
+                            </div>
+                            ') . '
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn" style="background: linear-gradient(135deg, var(--guider-blue), var(--guider-blue-light)); color: white; border: none; border-radius: 10px; padding: 0.75rem 2rem;" data-bs-toggle="modal" data-bs-target="#guiderModal' . $guiderID . '" data-bs-dismiss="modal">
+                                <i class="fas fa-arrow-left me-2"></i>Back to Profile
+                            </button>
+                            <button type="button" class="btn btn-close-red" data-bs-dismiss="modal">
+                                <i class="fas fa-times me-2"></i>Close
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Schedule Modal for this guider -->
+            <div class="modal fade" id="scheduleModal' . $guiderID . '" tabindex="-1" aria-hidden="true">
+                <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+                    <div class="modal-content">
+                        <div class="modal-header" style="background: linear-gradient(135deg, var(--guider-blue-dark), var(--guider-blue)); color: white;">
+                            <h5 class="modal-title">
+                                <i class="fas fa-calendar-alt me-2"></i>Schedule - ' . $name . '
+                            </h5>
+                            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                        </div>
+                        <div class="modal-body" style="max-height: 60vh; overflow-y: auto;">
+                            <!-- Legend -->
+                            <div class="schedule-legend mb-3 p-2" style="background: #f8fafc; border-radius: 8px; display: flex; flex-wrap: wrap; gap: 1rem; font-size: 0.85rem;">
+                                <div><span style="display: inline-block; width: 12px; height: 12px; background: #dc2626; border-radius: 3px; margin-right: 5px;"></span>Off Day</div>
+                                <div><span style="display: inline-block; width: 12px; height: 12px; background: #7c3aed; border-radius: 3px; margin-right: 5px;"></span>Booked (Private)</div>
+                                <div><span style="display: inline-block; width: 12px; height: 12px; background: #059669; border-radius: 3px; margin-right: 5px;"></span>Open Group</div>
+                            </div>
+                            ' . (count($scheduleData) > 0 ? '
+                            <div class="schedule-list">
+                                ' . implode("", array_map(function($date, $info) {
+                                    $formattedDate = date("l, d M Y", strtotime($date));
+                                    $daysUntil = (strtotime($date) - strtotime(date("Y-m-d"))) / 86400;
+                                    $daysText = "";
+                                    if ($daysUntil == 0) {
+                                        $daysText = "Today";
+                                    } elseif ($daysUntil == 1) {
+                                        $daysText = "Tomorrow";
+                                    } else {
+                                        $daysText = "In " . (int)$daysUntil . " days";
+                                    }
+                                    
+                                    // Set colors and icons based on type
+                                    $bgColor = "#fef2f2"; $borderColor = "#dc2626"; $textColor = "#991b1b"; $icon = "fa-calendar-times";
+                                    $statusBadge = "<span style=\"background: #dc2626; color: white; padding: 0.25rem 0.75rem; border-radius: 20px; font-size: 0.75rem; font-weight: 600;\">Off Day</span>";
+                                    
+                                    if ($info["type"] === "booked") {
+                                        $bgColor = "#f5f3ff"; $borderColor = "#7c3aed"; $textColor = "#5b21b6"; $icon = "fa-lock";
+                                        $mountainText = $info["mountainName"] ? " - " . htmlspecialchars($info["mountainName"]) : "";
+                                        $statusBadge = "<span style=\"background: #7c3aed; color: white; padding: 0.25rem 0.75rem; border-radius: 20px; font-size: 0.75rem; font-weight: 600;\">Booked" . $mountainText . "</span>";
+                                    } elseif ($info["type"] === "open") {
+                                        $bgColor = "#ecfdf5"; $borderColor = "#059669"; $textColor = "#065f46"; $icon = "fa-users";
+                                        $slots = (int)$info["slotsLeft"];
+                                        $mountainText = $info["mountainName"] ? " @ " . htmlspecialchars($info["mountainName"]) : "";
+                                        $statusBadge = "<span style=\"background: #059669; color: white; padding: 0.25rem 0.75rem; border-radius: 20px; font-size: 0.75rem; font-weight: 600;\">Open Group" . $mountainText . " - " . $slots . " slot" . ($slots != 1 ? "s" : "") . " left</span>";
+                                    }
+                                    
+                                    return "
+                                    <div class=\"schedule-item\" style=\"background: " . $bgColor . "; border-radius: 12px; padding: 1rem; margin-bottom: 0.75rem; border-left: 4px solid " . $borderColor . ";\">
+                                        <div style=\"display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 0.5rem;\">
+                                            <div>
+                                                <div style=\"font-weight: 600; color: " . $textColor . "; margin-bottom: 0.25rem;\">
+                                                    <i class=\"fas " . $icon . " me-2\"></i>" . $formattedDate . "
+                                                </div>
+                                                <div style=\"font-size: 0.8rem; color: #64748b;\">" . $daysText . "</div>
+                                            </div>
+                                            <div>" . $statusBadge . "</div>
+                                        </div>
+                                    </div>";
+                                }, array_keys($scheduleData), array_values($scheduleData))) . '
+                            </div>
+                            ' : '
+                            <div style="text-align: center; padding: 3rem; color: #16a34a;">
+                                <i class="fas fa-calendar-check" style="font-size: 4rem; margin-bottom: 1rem; opacity: 0.5;"></i>
+                                <h5 style="color: #166534;">Fully Available!</h5>
+                                <p>This guide has no bookings or off days scheduled for the next 60 days.</p>
+                            </div>
+                            ') . '
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn" style="background: linear-gradient(135deg, var(--guider-blue), var(--guider-blue-light)); color: white; border: none; border-radius: 10px; padding: 0.75rem 2rem;" data-bs-toggle="modal" data-bs-target="#guiderModal' . $guiderID . '" data-bs-dismiss="modal">
+                                <i class="fas fa-arrow-left me-2"></i>Back to Profile
+                            </button>
+                            <button type="button" class="btn btn-close-red" data-bs-dismiss="modal">
+                                <i class="fas fa-times me-2"></i>Close
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -1436,17 +1786,27 @@ class VisualCalendar {
 
     async loadUnavailableDates() {
         try {
-            const response = await fetch('get_unavailable_dates.php');
-            const data = await response.json();
-            
-            if (data.success) {
+            const response = await fetch('get_unavailable_dates.php', { cache: 'no-store', headers: { 'Accept': 'application/json' } });
+            if (!response.ok) {
+                console.warn('Unavailable dates endpoint returned non-OK:', response.status);
+                // Non-blocking: proceed with empty unavailable dates
+                return;
+            }
+            let data = null;
+            try {
+                data = await response.json();
+            } catch (parseErr) {
+                console.warn('Unavailable dates response is not valid JSON');
+                return; // Non-blocking
+            }
+            if (data && data.success && Array.isArray(data.dates)) {
                 // Only past dates are blocked - all future dates are available
                 // Guider availability filtering happens after date selection
                 this.unavailableDates = new Set(data.dates);
             }
         } catch (error) {
             console.error('Error loading unavailable dates:', error);
-            notificationSystem.error('Error', 'Failed to load calendar data');
+            // Silent fail: keep calendar usable instead of showing an error toast
         }
     }
 
@@ -1781,8 +2141,32 @@ document.getElementById('dateModal').addEventListener('shown.bs.modal', function
   });
 </script>
 
+<!-- Image Lightbox Modal -->
+<div class="modal fade" id="imageViewModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered" style="max-width: 90vw;">
+    <div class="modal-content" style="background: transparent; border: none; box-shadow: none;">
+      <div class="modal-body text-center p-0 position-relative">
+        <button type="button" class="btn-close btn-close-white position-absolute" style="top: -40px; right: 0; font-size: 1.5rem; opacity: 1;" data-bs-dismiss="modal" aria-label="Close"></button>
+        <img id="imageViewModalImg" src="" alt="" style="max-width: 100%; max-height: 80vh; border-radius: 12px; box-shadow: 0 10px 40px rgba(0,0,0,0.5);">
+        <div id="imageViewModalCaption" style="color: white; margin-top: 1rem; font-size: 1.2rem; font-weight: 600; text-shadow: 0 2px 4px rgba(0,0,0,0.5);"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function openImageModal(imageSrc, guiderName) {
+  document.getElementById('imageViewModalImg').src = imageSrc;
+  document.getElementById('imageViewModalCaption').textContent = guiderName;
+  var imageModal = new bootstrap.Modal(document.getElementById('imageViewModal'));
+  imageModal.show();
+}
+</script>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons/font/bootstrap-icons.css" rel="stylesheet" />
+
+<?php include_once '../AIChatbox/chatbox_include.php'; ?>
+
 </body>
 </html>

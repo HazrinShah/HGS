@@ -1,4 +1,10 @@
 <?php
+// TEMPORARY DEBUG - Remove after fixing
+ini_set('display_errors', 1);
+ini_set('display_startup_errors', 1);
+error_reporting(E_ALL);
+
+ob_start();  
 session_start();
 $ua = $_SERVER['HTTP_USER_AGENT'] ?? '';
 $ip = $_SERVER['REMOTE_ADDR'] ?? '';
@@ -16,7 +22,22 @@ if (!isset($_SESSION['fp'])) {
 }
 include '../shared/db_connection.php';
 
-// Session debug: log entry with current user and URL
+// create table bookinghikerdetails kalau tak ada (letak kat atas supaya create awal-awal)
+$conn->query("CREATE TABLE IF NOT EXISTS bookinghikerdetails (
+    hikerDetailID INT AUTO_INCREMENT PRIMARY KEY,
+    bookingID INT NOT NULL,
+    hikerName VARCHAR(255) NOT NULL,
+    identityCard VARCHAR(50) NOT NULL,
+    address TEXT NOT NULL,
+    phoneNumber VARCHAR(20) NOT NULL,
+    emergencyContactName VARCHAR(255) NOT NULL,
+    emergencyContactNumber VARCHAR(20) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (bookingID) REFERENCES booking(bookingID) ON DELETE CASCADE,
+    INDEX idx_bookingID (bookingID)
+) ENGINE=InnoDB");
+
+// session debug: log entry dengan current user dan URL
 try {
     $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
     $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
@@ -24,26 +45,37 @@ try {
     $fullUrl = $scheme . '://' . $host . $uri;
     error_log("HBooking1.php ENTRY: hikerID=" . ($_SESSION['hikerID'] ?? 'N/A') . " URL=" . $fullUrl);
 } catch (Throwable $e) {
-    // ignore
+    // ignore je
 }
 
 if (!isset($_SESSION['hikerID'])) {
-    // Debug: Log session information
+    // debug: log session information
     error_log("HBooking1.php - Session hikerID not set. Session data: " . print_r($_SESSION, true));
     echo "Session hikerID not set! Please log in again.";
     exit;
 }
 $hikerID = $_SESSION['hikerID'];
 
-// Debug: Log successful session
+// debug: log successful session
 error_log("HBooking1.php - User logged in with hikerID: $hikerID");
-$guiderID = $_GET['guiderID'] ?? null;
+$guiderID = $_GET['guiderID'] ?? $_POST['guiderID'] ?? null;
 $startDate = $_POST['startDate'] ?? $_GET['start'] ?? null;
 $endDate = $_POST['endDate'] ?? $_GET['end'] ?? null;
-$preSelectedMountainID = $_GET['mountainID'] ?? null;
+$preSelectedMountainID = $_GET['mountainID'] ?? $_POST['mountainID'] ?? null;
+
+// Helper function to build redirect URL with preserved parameters
+function buildRedirectUrl($guiderID, $startDate, $endDate, $mountainID = null, $additionalParams = []) {
+    $params = [];
+    if ($guiderID) $params['guiderID'] = $guiderID;
+    if ($startDate) $params['start'] = $startDate;
+    if ($endDate) $params['end'] = $endDate;
+    if ($mountainID) $params['mountainID'] = $mountainID;
+    $params = array_merge($params, $additionalParams);
+    return "HBooking1.php?" . http_build_query($params);
+}
 
 
-// Fetch guider info for pricing
+// ambil guider info untuk pricing
 $guider = $conn->prepare("SELECT price FROM guider WHERE guiderID = ?");
 $guider->bind_param("i", $guiderID);
 $guider->execute();
@@ -51,7 +83,7 @@ $guiderResult = $guider->get_result();
 $guiderData = $guiderResult->fetch_assoc();
 $price = $guiderData['price'] ?? 0;
 
-// Check if this is an open group booking (mountain pre-selected)
+// check kalau ni open group booking (mountain dah pre-selected)
 $isOpenGroupBooking = false;
 $openGroupMountain = null;
 if ($preSelectedMountainID && $startDate && $endDate) {
@@ -77,21 +109,23 @@ if ($preSelectedMountainID && $startDate && $endDate) {
     $openGroupResult = $openGroupStmt->get_result();
     $openGroupMountain = $openGroupResult->fetch_assoc();
     
-    if ($openGroupMountain) {
+    // Only set isOpenGroupBooking = true if there are EXISTING hikers in an open group
+    // This prevents close group bookings from being treated as open group on error redirect
+    if ($openGroupMountain && (int)($openGroupMountain['existingHikers'] ?? 0) > 0) {
         $isOpenGroupBooking = true;
     }
 }
 
 if (isset($_POST['book'])) {
-    // Persist open-group intent across POST (not only via GET)
+    // persist open-group intent across POST (bukan via GET je)
     if ((isset($_POST['groupType']) && $_POST['groupType'] === 'open')) {
         $isOpenGroupBooking = true;
         if (!empty($_POST['mountainID'])) {
             $preSelectedMountainID = $_POST['mountainID'];
         }
     }
-    // If POST came from an open-group join flow where groupType may be missing,
-    // infer 'open' when there is an existing open group for the same guider/mountain/date
+    // kalau POST datang dari open-group join flow yang groupType mungkin takde,
+    // infer 'open' kalau ada existing open group untuk guider/mountain/date yang sama
     $postMountainId = $_POST['mountainID'] ?? null;
     $postGroupType = $_POST['groupType'] ?? null;
     if (!$isOpenGroupBooking && $postMountainId && (!isset($_POST['groupType']) || $_POST['groupType'] !== 'close')) {
@@ -106,20 +140,84 @@ if (isset($_POST['book'])) {
             error_log("HBooking1.php - Inferred open-group intent from POST for mountainID={$postMountainId}");
         }
     }
-    // Debug: Log all POST data
+    // debug: log semua POST data
     error_log("HBooking1.php - POST data: " . print_r($_POST, true));
     error_log("HBooking1.php - GET data: " . print_r($_GET, true));
     
-    // For open group bookings, use the pre-selected mountain (fallback to POST)
+    // untuk open group bookings, guna pre-selected mountain (fallback ke POST)
     $mountainID = $isOpenGroupBooking ? ($preSelectedMountainID ?: ($_POST['mountainID'] ?? null)) : ($_POST['mountainID'] ?? null);
-    $totalHiker = $_POST['totalHiker'] ?? null;
-    // If user selected open or inferred open, force 'open' and never fall back to 'close'
+    
+    // dapat hiker details dari POST
+    $hikerDetails = [];
+    if (isset($_POST['hikerDetails']) && is_array($_POST['hikerDetails'])) {
+        foreach ($_POST['hikerDetails'] as $detail) {
+            if (!empty($detail['name']) && !empty($detail['identityCard']) && !empty($detail['address']) && 
+                !empty($detail['phoneNumber']) && !empty($detail['emergencyContactName']) && !empty($detail['emergencyContactNumber'])) {
+                $hikerDetails[] = $detail;
+            }
+        }
+    }
+    $totalHiker = count($hikerDetails);
+    
+    // Validate identity card format (12 digits, numbers only)
+    $invalidFormatICs = [];
+    foreach ($hikerDetails as $index => $detail) {
+        $ic = trim($detail['identityCard']);
+        if (empty($ic)) continue;
+        
+        // Check if IC is exactly 12 digits and contains only numbers
+        if (!preg_match('/^\d{12}$/', $ic)) {
+            $invalidFormatICs[] = $ic;
+        }
+    }
+    
+    // If invalid format found, show error
+    if (!empty($invalidFormatICs)) {
+        error_log("HBooking1.php - ERROR: Invalid identity card format found: " . implode(', ', $invalidFormatICs));
+        $errorMessage = "Invalid Identity Card Format";
+        $_SESSION['booking_error'] = $errorMessage;
+        $redirectUrl = buildRedirectUrl($guiderID, $_POST['startDate'] ?? null, $_POST['endDate'] ?? null, $preSelectedMountainID ?? null, ['error' => '1']);
+        header("Location: " . $redirectUrl);
+        exit();
+    }
+    
+    // Validate for duplicate identity cards within submitted hiker details
+    $identityCards = [];
+    $duplicateICs = [];
+    foreach ($hikerDetails as $index => $detail) {
+        $ic = trim($detail['identityCard']);
+        if (empty($ic)) continue;
+        
+        // Check for duplicates within the form
+        if (in_array($ic, $identityCards)) {
+            if (!in_array($ic, $duplicateICs)) {
+                $duplicateICs[] = $ic;
+            }
+        } else {
+            $identityCards[] = $ic;
+        }
+    }
+    
+    // If duplicates found within form, show error
+    if (!empty($duplicateICs)) {
+        error_log("HBooking1.php - ERROR: Duplicate identity cards found in form: " . implode(', ', $duplicateICs));
+        $errorMessage = "Duplicate Identity Card";
+        $_SESSION['booking_error'] = $errorMessage;
+        $redirectUrl = buildRedirectUrl($guiderID, $_POST['startDate'] ?? null, $_POST['endDate'] ?? null, $preSelectedMountainID ?? null, ['error' => '1']);
+        header("Location: " . $redirectUrl);
+        exit();
+    }
+    
+    // NOTE: Duplicate IC check is ONLY within the same booking (above code)
+    // Same IC can be used in different bookings (e.g., same person booking multiple trips)
+    
+    // kalau user select open atau inferred open, force 'open' dan jangan fall back ke 'close'
     $groupType = $isOpenGroupBooking ? 'open' : ($_POST['groupType'] ?? 'close');
     $startDate = $_POST['startDate'] ?? date('Y-m-d');
     $endDate = $_POST['endDate'] ?? date('Y-m-d');
     $status = "pending";
 
-    // Debug: Log the mountainID value
+    // debug: log nilai mountainID
     error_log("HBooking1.php - MountainID: " . ($mountainID ?? 'NULL') . ", isOpenGroupBooking: " . ($isOpenGroupBooking ? 'true' : 'false') . ", preSelectedMountainID: " . ($preSelectedMountainID ?? 'NULL') . ", POST mountainID: " . ($_POST['mountainID'] ?? 'NULL'));
 
     // Validate required fields
@@ -137,7 +235,7 @@ if (isset($_POST['book'])) {
         error_log("HBooking1.php - ERROR: Invalid totalHiker value: " . ($totalHiker ?? 'NULL'));
         echo "<div style='background: #fee; border: 1px solid #fcc; padding: 20px; margin: 20px; border-radius: 5px;'>";
         echo "<h3 style='color: #c33;'>Booking Error</h3>";
-        echo "<p>Please enter a valid number of hikers (1-7).</p>";
+        echo "<p>Please add at least one hiker with complete details (1-7 hikers maximum).</p>";
         echo "<a href='javascript:history.back()' style='background: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;'>Go Back</a>";
         echo "</div>";
         exit();
@@ -175,7 +273,7 @@ if (isset($_POST['book'])) {
         $existingOpen->close();
 
         if ($openRow) {
-            // Check forming window and capacity
+            // check forming window dan capacity
             $groupStartTs = $openRow['groupStart'] ? strtotime($openRow['groupStart']) : time();
             $recruitDeadline = $groupStartTs + (3 * 60);
             $capStmt = $conn->prepare("
@@ -192,9 +290,9 @@ if (isset($_POST['book'])) {
             $formingOpen = (time() < $recruitDeadline) && ($currentSize < 7);
 
             if ($formingOpen) {
-                // Join into existing open booking via bookingParticipant, update booking.totalHiker
-                // Ensure participants table exists
-                $conn->query("CREATE TABLE IF NOT EXISTS bookingParticipant (
+                // join ke existing open booking via bookingParticipant, update booking.totalHiker
+                // pastikan participants table ada
+                $conn->query("CREATE TABLE IF NOT EXISTS bookingparticipant (
                     bookingID INT NOT NULL,
                     hikerID INT NOT NULL,
                     qty INT NOT NULL,
@@ -205,7 +303,7 @@ if (isset($_POST['book'])) {
                 $joinQty = (int)$totalHiker;
                 $bookingIDAnchor = (int)$openRow['bookingID'];
 
-                // Capacity check against anchor booking's totalHiker
+                // capacity check terhadap anchor booking totalHiker
                 if (($currentSize + $joinQty) > 7) {
                     $seatsLeft = max(0, 7 - $currentSize);
                     echo "<div style='background:#fee;border:1px solid #fcc;padding:20px;margin:20px;border-radius:5px;'>";
@@ -217,20 +315,105 @@ if (isset($_POST['book'])) {
                 }
 
                 // Upsert participant row
-                $upsert = $conn->prepare("INSERT INTO bookingParticipant (bookingID, hikerID, qty)
+                $upsert = $conn->prepare("INSERT INTO bookingparticipant (bookingID, hikerID, qty)
                                           VALUES (?, ?, ?)
                                           ON DUPLICATE KEY UPDATE qty = qty + VALUES(qty)");
                 $upsert->bind_param('iii', $bookingIDAnchor, $hikerID, $joinQty);
                 $upsert->execute();
                 $upsert->close();
+                
+                // Validate identity card format (12 digits, numbers only) for joining open group
+                $joinInvalidFormatICs = [];
+                foreach ($hikerDetails as $detail) {
+                    $ic = trim($detail['identityCard']);
+                    if (empty($ic)) continue;
+                    
+                    // Check if IC is exactly 12 digits and contains only numbers
+                    if (!preg_match('/^\d{12}$/', $ic)) {
+                        $joinInvalidFormatICs[] = $ic;
+                    }
+                }
+                
+                // If invalid format found, show error
+                if (!empty($joinInvalidFormatICs)) {
+                    error_log("HBooking1.php - ERROR: Invalid identity card format found when joining open group: " . implode(', ', $joinInvalidFormatICs));
+                    $errorMessage = "Invalid Identity Card Format";
+                    $_SESSION['booking_error'] = $errorMessage;
+                    $redirectUrl = buildRedirectUrl($guiderID, $_POST['startDate'] ?? null, $_POST['endDate'] ?? null, $preSelectedMountainID ?? null, ['error' => '1']);
+                    header("Location: " . $redirectUrl);
+                    exit();
+                }
+                
+                // Validate identity cards before inserting for joining open group
+                $joinIdentityCards = array_column($hikerDetails, 'identityCard');
+                if (!empty($joinIdentityCards)) {
+                    $joinPlaceholders = str_repeat('?,', count($joinIdentityCards) - 1) . '?';
+                    $checkJoinDuplicateStmt = $conn->prepare("SELECT identityCard FROM bookinghikerdetails WHERE identityCard IN ($joinPlaceholders)");
+                    $checkJoinDuplicateStmt->bind_param(str_repeat('s', count($joinIdentityCards)), ...$joinIdentityCards);
+                    $checkJoinDuplicateStmt->execute();
+                    $existingJoinICs = $checkJoinDuplicateStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+                    $checkJoinDuplicateStmt->close();
+                    
+                    if (!empty($existingJoinICs)) {
+                        $existingJoinICList = array_column($existingJoinICs, 'identityCard');
+                        error_log("HBooking1.php - ERROR: Identity cards already exist when joining open group: " . implode(', ', $existingJoinICList));
+                        $errorMessage = "Duplicate Identity Card";
+                        $_SESSION['booking_error'] = $errorMessage;
+                        $redirectUrl = buildRedirectUrl($guiderID, $_POST['startDate'] ?? null, $_POST['endDate'] ?? null, $preSelectedMountainID ?? null, ['error' => '1']);
+                        header("Location: " . $redirectUrl);
+                        exit();
+                    }
+                }
+                
+                // Insert hiker details for joining open group
+                $hikerDetailStmt = $conn->prepare("INSERT INTO bookinghikerdetails (bookingID, hikerName, identityCard, address, phoneNumber, emergencyContactName, emergencyContactNumber) VALUES (?, ?, ?, ?, ?, ?, ?)");
+                $joinInsertError = false;
+                $joinDuplicateIC = '';
+                foreach ($hikerDetails as $detail) {
+                    $hikerDetailStmt->bind_param('issssss', $bookingIDAnchor, $detail['name'], $detail['identityCard'], $detail['address'], $detail['phoneNumber'], $detail['emergencyContactName'], $detail['emergencyContactNumber']);
+                    if (!$hikerDetailStmt->execute()) {
+                        // Check if error is due to duplicate identity card
+                        if ($conn->errno == 1062) { // MySQL duplicate entry error
+                            $joinInsertError = true;
+                            $joinDuplicateIC = $detail['identityCard'];
+                            break;
+                        } else {
+                            error_log("HBooking1.php - Error inserting hiker detail for open group: " . $conn->error);
+                            $joinInsertError = true;
+                            break;
+                        }
+                    }
+                }
+                $hikerDetailStmt->close();
+                
+                // If insert failed, rollback participant update
+                if ($joinInsertError) {
+                    // Remove participant if it was added
+                    $removeParticipant = $conn->prepare("DELETE FROM bookingparticipant WHERE bookingID = ? AND hikerID = ?");
+                    $removeParticipant->bind_param('ii', $bookingIDAnchor, $hikerID);
+                    $removeParticipant->execute();
+                    $removeParticipant->close();
+                    
+                    if (!empty($joinDuplicateIC)) {
+                        $_SESSION['booking_error'] = "Duplicate Identity Card";
+                        $redirectUrl = buildRedirectUrl($guiderID, $_POST['startDate'] ?? null, $_POST['endDate'] ?? null, $preSelectedMountainID ?? null, ['error' => '1']);
+                        header("Location: " . $redirectUrl);
+                        exit();
+                    } else {
+                        $_SESSION['booking_error'] = "An error occurred while joining the open group. Please try again.";
+                        $redirectUrl = buildRedirectUrl($guiderID, $_POST['startDate'] ?? null, $_POST['endDate'] ?? null, $preSelectedMountainID ?? null, ['error' => '1']);
+                        header("Location: " . $redirectUrl);
+                        exit();
+                    }
+                }
 
-                // Update booking totalHiker atomically
+                // update booking totalHiker atomically
                 $updTot = $conn->prepare("UPDATE booking SET totalHiker = totalHiker + ? WHERE bookingID = ?");
                 $updTot->bind_param('ii', $joinQty, $bookingIDAnchor);
                 $updTot->execute();
                 $updTot->close();
 
-                // Redirect straight to payment; do not create a new booking
+                // redirect terus ke payment; jangan create booking baru
                 error_log("HBooking1.php - Joined existing open bookingID={$bookingIDAnchor} by hikerID={$hikerID} qty={$joinQty}");
                 header("Location: HPayment.php");
                 exit();
@@ -325,16 +508,56 @@ if (isset($_POST['book'])) {
         
         error_log("HBooking1.php - Booking created successfully. BookingID: $bookingID, HikerID: $hikerID, GuiderID: $guiderID, MountainID: $mountainID, Status: pending");
         
-        // For new open-group booking, also create participant row for the creator
+        // Insert hiker details
+        $hikerDetailStmt = $conn->prepare("INSERT INTO bookinghikerdetails (bookingID, hikerName, identityCard, address, phoneNumber, emergencyContactName, emergencyContactNumber) VALUES (?, ?, ?, ?, ?, ?, ?)");
+        $insertError = false;
+        $duplicateIC = '';
+        foreach ($hikerDetails as $detail) {
+            $hikerDetailStmt->bind_param('issssss', $bookingID, $detail['name'], $detail['identityCard'], $detail['address'], $detail['phoneNumber'], $detail['emergencyContactName'], $detail['emergencyContactNumber']);
+            if (!$hikerDetailStmt->execute()) {
+                // Check if error is due to duplicate identity card
+                if ($conn->errno == 1062) { // MySQL duplicate entry error
+                    $insertError = true;
+                    $duplicateIC = $detail['identityCard'];
+                    break;
+                } else {
+                    error_log("HBooking1.php - Error inserting hiker detail: " . $conn->error);
+                    $insertError = true;
+                    break;
+                }
+            }
+        }
+        $hikerDetailStmt->close();
+        
+        // If insert failed due to duplicate, rollback and show error
+        if ($insertError && !empty($duplicateIC)) {
+            // Delete the booking that was created
+            $rollbackStmt = $conn->prepare("DELETE FROM booking WHERE bookingID = ?");
+            $rollbackStmt->bind_param('i', $bookingID);
+            $rollbackStmt->execute();
+            $rollbackStmt->close();
+            
+            $_SESSION['booking_error'] = "Duplicate Identity Card";
+            $redirectUrl = buildRedirectUrl($guiderID, $_POST['startDate'] ?? null, $_POST['endDate'] ?? null, $preSelectedMountainID ?? null, ['error' => '1']);
+            header("Location: " . $redirectUrl);
+            exit();
+        } else if ($insertError) {
+            $_SESSION['booking_error'] = "An error occurred while saving hiker details. Please try again.";
+            $redirectUrl = buildRedirectUrl($guiderID, $_POST['startDate'] ?? null, $_POST['endDate'] ?? null, $preSelectedMountainID ?? null, ['error' => '1']);
+            header("Location: " . $redirectUrl);
+            exit();
+        }
+        
+        // untuk new open-group booking, create participant row untuk creator jugak
         if ($groupType === 'open') {
-            $conn->query("CREATE TABLE IF NOT EXISTS bookingParticipant (
+            $conn->query("CREATE TABLE IF NOT EXISTS bookingparticipant (
                 bookingID INT NOT NULL,
                 hikerID INT NOT NULL,
                 qty INT NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 PRIMARY KEY (bookingID, hikerID)
             ) ENGINE=InnoDB");
-            $insP = $conn->prepare("INSERT INTO bookingParticipant (bookingID, hikerID, qty) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE qty = VALUES(qty)");
+            $insP = $conn->prepare("INSERT INTO bookingparticipant (bookingID, hikerID, qty) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE qty = VALUES(qty)");
             $insP->bind_param('iii', $bookingID, $hikerID, $totalHiker);
             $insP->execute();
             $insP->close();
@@ -350,8 +573,11 @@ if (isset($_POST['book'])) {
             'totalPrice' => $totalPrice
         ];
         // Log before redirect to help detect session flips
-        error_log("HBooking1.php REDIRECT: hikerID=" . ($_SESSION['hikerID'] ?? 'N/A') . " to HBooking1.php?guiderID=".$guiderID."&success=1");
-        header("Location: HBooking1.php?guiderID=".$guiderID."&success=1");
+        error_log("HBooking1.php REDIRECT: hikerID=" . ($_SESSION['hikerID'] ?? 'N/A') . " to HPayment.php");
+        
+        // Clear output buffer and redirect
+        ob_end_clean();
+        header("Location: HPayment.php");
         exit();
     } else {
         error_log("HBooking1.php - Booking insertion failed: " . $insert->error);
@@ -361,7 +587,7 @@ if (isset($_POST['book'])) {
 
 }
 
-// Fetch all mountains
+// ambil semua mountains
 $mountainQuery = "SELECT * FROM mountain";
 $mountainResult = $conn->query($mountainQuery);
 ?>
@@ -554,11 +780,17 @@ $mountainResult = $conn->query($mountainQuery);
       box-shadow: 0 4px 15px rgba(30, 64, 175, 0.3);
     }
 
-    .book-btn:hover {
+    .book-btn:hover:not(:disabled) {
       background: linear-gradient(135deg, var(--guider-blue-dark), var(--guider-blue));
       transform: translateY(-2px);
       box-shadow: 0 8px 25px rgba(30, 64, 175, 0.4);
       color: white;
+    }
+
+    .book-btn:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      transform: none;
     }
 
         /* Responsive Design */
@@ -1369,6 +1601,85 @@ $mountainResult = $conn->query($mountainQuery);
                 gap: 0.75rem;
             }
         }
+        
+        /* Hiker Detail Form Styles */
+        .hiker-detail-form {
+            background: var(--guider-blue-soft);
+            border: 2px solid var(--guider-blue);
+            border-radius: 15px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            position: relative;
+        }
+        
+        .hiker-detail-form-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+            padding-bottom: 0.75rem;
+            border-bottom: 2px solid var(--guider-blue);
+        }
+        
+        .hiker-detail-form-title {
+            color: var(--guider-blue-dark);
+            font-weight: 700;
+            font-size: 1.1rem;
+            margin: 0;
+        }
+        
+        .remove-hiker-btn {
+            background: #ef4444;
+            border: none;
+            color: white;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-size: 0.9rem;
+        }
+        
+        .remove-hiker-btn:hover {
+            background: #dc2626;
+            transform: scale(1.1);
+        }
+        
+        .hiker-detail-form .row {
+            margin-bottom: 1rem;
+        }
+        
+        .hiker-detail-form .form-label {
+            font-size: 0.9rem;
+            margin-bottom: 0.5rem;
+        }
+        
+        .hiker-detail-form .form-control {
+            font-size: 0.9rem;
+        }
+        
+        #addHikerBtn {
+            transition: all 0.3s ease;
+            width: 100%;
+            max-width: 300px;
+            padding: 12px 20px;
+            font-weight: 600;
+        }
+        
+        #addHikerBtn:hover {
+            background: var(--guider-blue);
+            color: white;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(30, 64, 175, 0.3);
+        }
+        
+        #addHikerBtn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
     </style>
 </head>
 <body>
@@ -1384,7 +1695,7 @@ $mountainResult = $conn->query($mountainQuery);
         <span class="navbar-toggler-icon"></span>
       </button>
       <h1 class="navbar-title text-white mx-auto">HIKING GUIDANCE SYSTEM</h1>
-      <a class="navbar-brand" href="../index.html">
+      <a class="navbar-brand" href="../index.php">
         <img src="../img/logo.png" class="img-fluid logo" alt="HGS Logo">
       </a>
     </div>
@@ -1552,10 +1863,10 @@ $mountainResult = $conn->query($mountainQuery);
       </div>
     </div>
 
-<form method="POST" action="HBooking1.php?guiderID=<?= $guiderID ?>">
-    <input type="hidden" name="startDate" value="<?= htmlspecialchars($_GET['start'] ?? '') ?>">
-    <input type="hidden" name="endDate" value="<?= htmlspecialchars($_GET['end'] ?? '') ?>">
-    <input type="hidden" id="guiderID" value="<?= htmlspecialchars($guiderID) ?>">
+<form method="POST" action="HBooking1.php?guiderID=<?= htmlspecialchars($guiderID ?? '') ?><?= ($startDate ? '&start=' . urlencode($startDate) : '') ?><?= ($endDate ? '&end=' . urlencode($endDate) : '') ?>">
+    <input type="hidden" name="startDate" value="<?= htmlspecialchars($startDate ?? '') ?>">
+    <input type="hidden" name="endDate" value="<?= htmlspecialchars($endDate ?? '') ?>">
+    <input type="hidden" name="guiderID" id="guiderID" value="<?= htmlspecialchars($guiderID ?? '') ?>">
     <?php if ($isOpenGroupBooking): ?>
     <input type="hidden" id="existingHikers" value="<?= htmlspecialchars($openGroupMountain['existingHikers']) ?>">
     <input type="hidden" name="mountainID" value="<?= htmlspecialchars($preSelectedMountainID) ?>">
@@ -1643,16 +1954,26 @@ $mountainResult = $conn->query($mountainQuery);
         </div>
         <?php endif; ?>
 
-    <!-- Total Hiker Input -->
+    <!-- Hiker Details Section -->
     <div class="mt-4">
-          <label for="totalHiker" class="form-label">
-            <i class="fas fa-users me-2"></i>Total Hikers (7 maximum)
+          <label class="form-label">
+            <i class="fas fa-users me-2"></i>Hiker Details (Maximum 7 hikers)
             <?php if ($isOpenGroupBooking): ?>
             <?php $seatsLeft = max(0, 7 - (int)($openGroupMountain['existingHikers'] ?? 0)); ?>
             <small class="text-muted d-block">Existing group has <?= (int)($openGroupMountain['existingHikers'] ?? 0) ?> hikers • Seats left: <?= $seatsLeft ?></small>
             <?php endif; ?>
           </label>
-          <input type="number" name="totalHiker" min="1" <?php if ($isOpenGroupBooking): ?>max="<?= $seatsLeft ?>"<?php else: ?>max="7"<?php endif; ?> required class="form-control" style="max-width: 200px;" id="totalHikerInput" <?php if ($isOpenGroupBooking && $seatsLeft === 0): ?>disabled<?php endif; ?>>
+          
+          <div id="hikerDetailsContainer">
+              <!-- Hiker forms will be added here dynamically -->
+          </div>
+          
+          <button type="button" class="btn btn-outline-primary mt-3" id="addHikerBtn" style="border-color: var(--guider-blue); color: var(--guider-blue); width: 100%; max-width: 300px;">
+              <i class="fas fa-plus-circle me-2"></i>Add Hiker
+          </button>
+          
+          <input type="hidden" name="totalHiker" id="totalHikerInput" value="0">
+          
           <?php if ($isOpenGroupBooking): ?>
           <div id="hikerValidation" class="text-danger mt-2" style="display: none;">
             <i class="fas fa-exclamation-triangle me-1"></i>
@@ -1894,213 +2215,181 @@ function closeBookingNotification() {
 
 // Edit Calendar System removed - keeping only date summary
 
-
-
-
-
-    renderCalendar() {
-        console.log('Rendering calendar...');
-        const calendarContent = document.getElementById('editCalendarContent');
-        const calendarTitle = document.getElementById('editCalendarTitle');
-        
-        if (!calendarContent) {
-            console.error('Calendar content element not found');
-            return;
-        }
-        
-        const monthNames = [
-            'January', 'February', 'March', 'April', 'May', 'June',
-            'July', 'August', 'September', 'October', 'November', 'December'
-        ];
-        
-        calendarTitle.textContent = `${monthNames[this.currentMonth]} ${this.currentYear}`;
-        
-        const firstDay = new Date(this.currentYear, this.currentMonth, 1);
-        const lastDay = new Date(this.currentYear, this.currentMonth + 1, 0);
-        const daysInMonth = lastDay.getDate();
-        const startingDayOfWeek = firstDay.getDay();
-        
-        let calendarHTML = `
-            <div class="calendar-grid">
-                <div class="calendar-day-header">Sun</div>
-                <div class="calendar-day-header">Mon</div>
-                <div class="calendar-day-header">Tue</div>
-                <div class="calendar-day-header">Wed</div>
-                <div class="calendar-day-header">Thu</div>
-                <div class="calendar-day-header">Fri</div>
-                <div class="calendar-day-header">Sat</div>
-        `;
-        
-        // Add empty cells for days before the first day of the month
-        for (let i = 0; i < startingDayOfWeek; i++) {
-            calendarHTML += `<div class="calendar-day other-month"></div>`;
-        }
-        
-        // Add days of the month
-        for (let day = 1; day <= daysInMonth; day++) {
-            const dateString = this.formatDate(this.currentYear, this.currentMonth, day);
-            const isToday = this.isToday(this.currentYear, this.currentMonth, day);
-            const isPastDate = this.isPastDate(this.currentYear, this.currentMonth, day);
-            const isUnavailable = this.unavailableDates.has(dateString) || isPastDate;
-            const isSelected = this.isDateSelected(dateString);
-            
-            let dayClasses = 'calendar-day';
-            if (isToday) dayClasses += ' today';
-            if (isUnavailable) dayClasses += ' unavailable';
-            else if (!isUnavailable) dayClasses += ' available';
-            if (isSelected) dayClasses += ' selected';
-            
-            const clickHandler = isUnavailable ? '' : `onclick="editCalendar.selectDate('${dateString}')"`;
-            
-            calendarHTML += `
-                <div class="${dayClasses}" ${clickHandler}>
-                    ${day}
-                </div>
-            `;
-        }
-        
-        calendarHTML += '</div>';
-        calendarContent.innerHTML = calendarHTML;
-        console.log('Calendar rendered successfully');
-    }
-
-    selectDate(dateString) {
-        // Check if date is unavailable (from server) or is a past date
-        const date = new Date(dateString);
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        date.setHours(0, 0, 0, 0);
-        
-        if (this.unavailableDates.has(dateString) || date < today) {
-            return;
-        }
-        
-        if (!this.selectedStartDate || (this.selectedStartDate && this.selectedEndDate)) {
-            // Start new selection
-            this.selectedStartDate = dateString;
-            this.selectedEndDate = null;
-        } else if (this.selectedStartDate && !this.selectedEndDate) {
-            // Complete selection
-            if (new Date(dateString) >= new Date(this.selectedStartDate)) {
-                this.selectedEndDate = dateString;
-            } else {
-                // If end date is before start date, swap them
-                this.selectedEndDate = this.selectedStartDate;
-                this.selectedStartDate = dateString;
-            }
-        }
-        
-        this.updateDateDisplays();
-        this.renderCalendar();
-        this.updateSubmitButton();
-    }
-
-    updateDateDisplays() {
-        const startDisplay = document.getElementById('editStartDateDisplay');
-        const endDisplay = document.getElementById('editEndDateDisplay');
-        
-        if (this.selectedStartDate) {
-            const startFormatted = this.formatDateForDisplay(this.selectedStartDate);
-            startDisplay.innerHTML = `<i class="fas fa-calendar-check me-2 text-success"></i>${startFormatted}`;
-        } else {
-            startDisplay.innerHTML = '<span class="text-muted">Select start date from calendar</span>';
-        }
-        
-        if (this.selectedEndDate) {
-            const endFormatted = this.formatDateForDisplay(this.selectedEndDate);
-            endDisplay.innerHTML = `<i class="fas fa-calendar-check me-2 text-success"></i>${endFormatted}`;
-        } else {
-            endDisplay.innerHTML = '<span class="text-muted">Select end date from calendar</span>';
-        }
-    }
-
-    updateSubmitButton() {
-        const submitBtn = document.getElementById('updateDatesBtn');
-        if (this.selectedStartDate && this.selectedEndDate) {
-            submitBtn.disabled = false;
-            submitBtn.classList.remove('btn-secondary');
-            submitBtn.classList.add('btn-warning');
-        } else {
-            submitBtn.disabled = true;
-            submitBtn.classList.remove('btn-warning');
-            submitBtn.classList.add('btn-secondary');
-        }
-    }
-
-    updateDates() {
-        if (!this.selectedStartDate || !this.selectedEndDate) {
-            notificationSystem.warning('Selection Required', 'Please select both start and end dates');
-            return;
-        }
-        
-        // Update the hidden form inputs
-        const startInput = document.querySelector('input[name="startDate"]');
-        const endInput = document.querySelector('input[name="endDate"]');
-        
-        if (startInput) startInput.value = this.selectedStartDate;
-        if (endInput) endInput.value = this.selectedEndDate;
-        
-        // Update the display
-        const startDisplay = document.getElementById('startDateDisplay');
-        const endDisplay = document.getElementById('endDateDisplay');
-        
-        startDisplay.textContent = this.formatDateForDisplay(this.selectedStartDate);
-        endDisplay.textContent = this.formatDateForDisplay(this.selectedEndDate);
-        
-        // Close modal
-        const modal = bootstrap.Modal.getInstance(document.getElementById('editDateModal'));
-        modal.hide();
-        
-        notificationSystem.success('Dates Updated', 'Your hiking dates have been updated successfully');
-    }
-
-    isDateSelected(dateString) {
-        if (!this.selectedStartDate) return false;
-        if (!this.selectedEndDate) return dateString === this.selectedStartDate;
-        
-        const date = new Date(dateString);
-        const start = new Date(this.selectedStartDate);
-        const end = new Date(this.selectedEndDate);
-        
-        return date >= start && date <= end;
-    }
-
-    isToday(year, month, day) {
-        const today = new Date();
-        return year === today.getFullYear() && 
-               month === today.getMonth() && 
-               day === today.getDate();
-    }
-
-    isPastDate(year, month, day) {
-        const today = new Date();
-        const dateToCheck = new Date(year, month, day);
-        
-        // Set time to start of day for accurate comparison
-        today.setHours(0, 0, 0, 0);
-        dateToCheck.setHours(0, 0, 0, 0);
-        
-        return dateToCheck < today;
-    }
-
-    formatDate(year, month, day) {
-        return `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-    }
-
-    formatDateForDisplay(dateString) {
-        const date = new Date(dateString);
-        return date.toLocaleDateString('en-US', { 
-            weekday: 'short', 
-            year: 'numeric', 
-            month: 'short', 
-            day: 'numeric' 
-        });
-    }
-}
-
 </script>
 
 <script>
+// Global functions for hiker form management
+let hikerDetailsContainer, addHikerBtn, totalHikerInput, existingHikersInput, validationDiv, validationMessage, submitButton;
+
+function getMaxHikers() {
+  if (existingHikersInput) {
+    const existingHikers = parseInt(existingHikersInput.value) || 0;
+    return 7 - existingHikers;
+  }
+  return 7;
+}
+
+function updateHikerCount() {
+  if (!hikerDetailsContainer || !totalHikerInput) return;
+  
+  const currentCount = hikerDetailsContainer.querySelectorAll('.hiker-detail-form').length;
+  totalHikerInput.value = currentCount;
+  
+  // Update add button state
+  if (addHikerBtn) {
+    const maxAllowed = getMaxHikers();
+    if (currentCount >= maxAllowed) {
+      addHikerBtn.disabled = true;
+      addHikerBtn.innerHTML = '<i class="fas fa-ban me-2"></i>Maximum hikers reached';
+    } else {
+      addHikerBtn.disabled = false;
+      addHikerBtn.innerHTML = '<i class="fas fa-plus-circle me-2"></i>Add Hiker';
+    }
+  }
+  
+  // Validate for open group bookings
+  if (existingHikersInput && validationDiv && validationMessage) {
+    const existingHikers = parseInt(existingHikersInput.value) || 0;
+    const totalHikers = existingHikers + currentCount;
+    
+    if (currentCount > 0 && totalHikers > 7) {
+      validationDiv.style.display = 'block';
+      validationMessage.textContent = `Total hikers would be ${totalHikers} (${existingHikers} existing + ${currentCount} new). Maximum allowed is 7. You can add maximum ${getMaxHikers()} hikers.`;
+      if (submitButton) submitButton.disabled = true;
+    } else {
+      validationDiv.style.display = 'none';
+      if (submitButton) submitButton.disabled = false;
+    }
+  }
+}
+
+function addHikerForm() {
+  if (!hikerDetailsContainer) return;
+  
+  const maxAllowed = getMaxHikers();
+  const currentCount = hikerDetailsContainer.querySelectorAll('.hiker-detail-form').length;
+  
+  if (currentCount >= maxAllowed) {
+    if (typeof notificationSystem !== 'undefined') {
+      notificationSystem.warning('Maximum Reached', `You can only add up to ${maxAllowed} hikers.`);
+    } else {
+      alert(`You can only add up to ${maxAllowed} hikers.`);
+    }
+    return;
+  }
+  
+  const hikerIndex = currentCount + 1;
+  const hikerForm = document.createElement('div');
+  hikerForm.className = 'hiker-detail-form';
+  hikerForm.dataset.index = hikerIndex;
+  
+  hikerForm.innerHTML = `
+    <div class="hiker-detail-form-header">
+      <h6 class="hiker-detail-form-title">
+        <i class="fas fa-user me-2"></i>Hiker ${hikerIndex}
+      </h6>
+      <button type="button" class="remove-hiker-btn" onclick="removeHikerForm(this)">
+        <i class="fas fa-times"></i>
+      </button>
+    </div>
+    <div class="row">
+      <div class="col-md-6">
+        <label class="form-label">Full Name <span class="text-danger">*</span></label>
+        <input type="text" name="hikerDetails[${hikerIndex}][name]" class="form-control" required>
+      </div>
+      <div class="col-md-6">
+        <label class="form-label">Identity Card / Passport <span class="text-danger">*</span></label>
+        <input type="text" name="hikerDetails[${hikerIndex}][identityCard]" class="form-control identity-card-input" required maxlength="12" pattern="[0-9]{12}" inputmode="numeric">
+        <div class="invalid-feedback identity-card-feedback" style="display: none;"></div>
+        <small class="form-text text-muted">Must be exactly 12 digits</small>
+      </div>
+    </div>
+    <div class="row">
+      <div class="col-12">
+        <label class="form-label">Address <span class="text-danger">*</span></label>
+        <textarea name="hikerDetails[${hikerIndex}][address]" class="form-control" rows="2" required></textarea>
+      </div>
+    </div>
+    <div class="row">
+      <div class="col-md-6">
+        <label class="form-label">Phone Number <span class="text-danger">*</span></label>
+        <input type="tel" name="hikerDetails[${hikerIndex}][phoneNumber]" class="form-control" required>
+      </div>
+      <div class="col-md-6">
+        <label class="form-label">Emergency Contact Name <span class="text-danger">*</span></label>
+        <input type="text" name="hikerDetails[${hikerIndex}][emergencyContactName]" class="form-control" required>
+      </div>
+    </div>
+    <div class="row">
+      <div class="col-md-6">
+        <label class="form-label">Emergency Contact Number <span class="text-danger">*</span></label>
+        <input type="tel" name="hikerDetails[${hikerIndex}][emergencyContactNumber]" class="form-control" required>
+      </div>
+    </div>
+  `;
+  
+  hikerDetailsContainer.appendChild(hikerForm);
+  updateHikerCount();
+  // Check for duplicates after adding a hiker
+  if (typeof checkDuplicateIdentityCards === 'function') {
+    checkDuplicateIdentityCards();
+  }
+  
+  // Scroll to the new form
+  hikerForm.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function removeHikerForm(button) {
+  if (!hikerDetailsContainer) return;
+  
+  const hikerForm = button.closest('.hiker-detail-form');
+  if (hikerForm) {
+    const currentCount = hikerDetailsContainer.querySelectorAll('.hiker-detail-form').length;
+    if (currentCount <= 1) {
+      if (typeof notificationSystem !== 'undefined') {
+        notificationSystem.warning('Cannot Remove', 'You must have at least one hiker.');
+      } else {
+        alert('You must have at least one hiker.');
+      }
+      return;
+    }
+    
+    hikerForm.remove();
+    updateHikerCount();
+    renumberHikerForms();
+    // Check for duplicates after removing a hiker
+    if (typeof checkDuplicateIdentityCards === 'function') {
+      checkDuplicateIdentityCards();
+    }
+  }
+}
+
+function renumberHikerForms() {
+  if (!hikerDetailsContainer) return;
+  
+  const forms = hikerDetailsContainer.querySelectorAll('.hiker-detail-form');
+  forms.forEach((form, index) => {
+    const newIndex = index + 1;
+    form.dataset.index = newIndex;
+    const title = form.querySelector('.hiker-detail-form-title');
+    if (title) {
+      title.innerHTML = `<i class="fas fa-user me-2"></i>Hiker ${newIndex}`;
+    }
+    
+    // Update all input names
+    const inputs = form.querySelectorAll('input, textarea');
+    inputs.forEach(input => {
+      const name = input.getAttribute('name');
+      if (name) {
+        const match = name.match(/hikerDetails\[\d+\]\[(\w+)\]/);
+        if (match) {
+          input.setAttribute('name', `hikerDetails[${newIndex}][${match[1]}]`);
+        }
+      }
+    });
+  });
+}
+
 document.addEventListener('DOMContentLoaded', function() {
   // Add visual feedback for mountain card selection
   const mountainCards = document.querySelectorAll('.mountain-card');
@@ -2129,47 +2418,293 @@ document.addEventListener('DOMContentLoaded', function() {
     });
   });
 
-  // Hiker validation for open group bookings
-  const existingHikersInput = document.getElementById('existingHikers');
-  const totalHikerInput = document.getElementById('totalHikerInput');
-  const validationDiv = document.getElementById('hikerValidation');
-  const validationMessage = document.getElementById('validationMessage');
-  const submitButton = document.querySelector('button[name="book"]');
-
-  if (existingHikersInput && totalHikerInput && validationDiv) {
-    const existingHikers = parseInt(existingHikersInput.value);
-    const maxAllowed = 7 - existingHikers;
-
-    function validateHikerCount() {
-      const newHikers = parseInt(totalHikerInput.value) || 0;
-      const totalHikers = existingHikers + newHikers;
-
-      if (newHikers > 0 && totalHikers > 7) {
-        validationDiv.style.display = 'block';
-        validationMessage.textContent = `Total hikers would be ${totalHikers} (${existingHikers} existing + ${newHikers} new). Maximum allowed is 7. You can add maximum ${maxAllowed} hikers.`;
-        totalHikerInput.setCustomValidity('Total hikers cannot exceed 7');
-        submitButton.disabled = true;
+  // Hiker Details Management - Initialize global variables
+  hikerDetailsContainer = document.getElementById('hikerDetailsContainer');
+  addHikerBtn = document.getElementById('addHikerBtn');
+  totalHikerInput = document.getElementById('totalHikerInput');
+  existingHikersInput = document.getElementById('existingHikers');
+  validationDiv = document.getElementById('hikerValidation');
+  validationMessage = document.getElementById('validationMessage');
+  submitButton = document.querySelector('button[name="book"]');
+  
+  // Add first hiker form by default
+  if (addHikerBtn) {
+    addHikerBtn.addEventListener('click', addHikerForm);
+    // Add first hiker form automatically
+    addHikerForm();
+  }
+  
+  // Form validation before submit
+  const bookingForm = document.querySelector('form[method="POST"]');
+  if (bookingForm) {
+    bookingForm.addEventListener('submit', function(e) {
+      // Debug: Log form data
+      console.log('Form submit triggered');
+      
+      // Check if dates are present
+      const startDateInput = bookingForm.querySelector('input[name="startDate"]');
+      const endDateInput = bookingForm.querySelector('input[name="endDate"]');
+      const guiderIDInput = bookingForm.querySelector('input[name="guiderID"]');
+      
+      console.log('Start Date:', startDateInput?.value);
+      console.log('End Date:', endDateInput?.value);
+      console.log('Guider ID:', guiderIDInput?.value);
+      
+      if (!startDateInput || !startDateInput.value || !startDateInput.value.trim()) {
+        e.preventDefault();
+        console.log('BLOCKED: Start date missing');
+        if (typeof notificationSystem !== 'undefined') {
+          notificationSystem.error('Validation Error', 'Start date is required. Please go back and select your hiking dates.');
+        } else {
+          alert('Start date is required. Please go back and select your hiking dates.');
+        }
         return false;
-      } else {
-        validationDiv.style.display = 'none';
-        totalHikerInput.setCustomValidity('');
-        submitButton.disabled = false;
-        return true;
       }
+      
+      if (!endDateInput || !endDateInput.value || !endDateInput.value.trim()) {
+        e.preventDefault();
+        console.log('BLOCKED: End date missing');
+        if (typeof notificationSystem !== 'undefined') {
+          notificationSystem.error('Validation Error', 'End date is required. Please go back and select your hiking dates.');
+        } else {
+          alert('End date is required. Please go back and select your hiking dates.');
+        }
+        return false;
+      }
+      
+      if (!guiderIDInput || !guiderIDInput.value || !guiderIDInput.value.trim()) {
+        e.preventDefault();
+        console.log('BLOCKED: Guider ID missing');
+        if (typeof notificationSystem !== 'undefined') {
+          notificationSystem.error('Validation Error', 'Guider information is missing. Please go back and try again.');
+        } else {
+          alert('Guider information is missing. Please go back and try again.');
+        }
+        return false;
+      }
+      
+      if (!hikerDetailsContainer) return;
+      
+      const hikerForms = hikerDetailsContainer.querySelectorAll('.hiker-detail-form');
+      if (hikerForms.length === 0) {
+        e.preventDefault();
+        if (typeof notificationSystem !== 'undefined') {
+          notificationSystem.error('Validation Error', 'Please add at least one hiker with complete details.');
+        } else {
+          alert('Please add at least one hiker with complete details.');
+        }
+        return false;
+      }
+      
+      // FIRST: Check for identity card format validation (12 digits, numbers only)
+      let hasInvalidFormat = false;
+      hikerForms.forEach((form, index) => {
+        const icInput = form.querySelector('input[name*="[identityCard]"]');
+        if (icInput && icInput.value.trim()) {
+          const ic = icInput.value.trim();
+          if (!/^\d{12}$/.test(ic)) {
+            hasInvalidFormat = true;
+            icInput.classList.add('is-invalid');
+            const feedbackDiv = form.querySelector('.identity-card-feedback');
+            if (feedbackDiv) {
+              feedbackDiv.textContent = 'Identity Card must be exactly 12 digits (numbers only).';
+              feedbackDiv.style.display = 'block';
+            }
+          } else {
+            icInput.classList.remove('is-invalid');
+          }
+        }
+      });
+      
+      if (hasInvalidFormat) {
+        e.preventDefault();
+        e.stopPropagation();
+        return false;
+      }
+      
+      // SECOND: Check for duplicate identity cards within the form
+      const identityCards = [];
+      const duplicateICs = [];
+      hikerForms.forEach((form, index) => {
+        const icInput = form.querySelector('input[name*="[identityCard]"]');
+        if (icInput && icInput.value.trim()) {
+          const ic = icInput.value.trim();
+          if (identityCards.includes(ic)) {
+            if (!duplicateICs.includes(ic)) {
+              duplicateICs.push(ic);
+            }
+            icInput.classList.add('is-invalid');
+            const feedbackDiv = form.querySelector('.identity-card-feedback');
+            if (feedbackDiv) {
+              feedbackDiv.textContent = 'This Identity Card is used by another hiker in your list.';
+              feedbackDiv.style.display = 'block';
+            }
+          } else {
+            identityCards.push(ic);
+          }
+        }
+      });
+      
+      // If duplicates found in form, block submission (button should already be disabled)
+      if (duplicateICs.length > 0) {
+        e.preventDefault();
+        e.stopPropagation();
+        return false;
+      }
+      
+      // Validate each form
+      let isValid = true;
+      hikerForms.forEach((form, index) => {
+        const inputs = form.querySelectorAll('input[required], textarea[required]');
+        inputs.forEach(input => {
+          if (!input.value.trim()) {
+            isValid = false;
+            input.classList.add('is-invalid');
+          } else {
+            input.classList.remove('is-invalid');
+          }
+        });
+      });
+      
+      if (!isValid) {
+        e.preventDefault();
+        if (typeof notificationSystem !== 'undefined') {
+          notificationSystem.error('Validation Error', 'Please fill in all required fields for all hikers.');
+        } else {
+          alert('Please fill in all required fields for all hikers.');
+        }
+        return false;
+      }
+      
+      // If we reach here, validation passed - allow form submission
+      // Server-side will check database duplicates and redirect back if needed
+    });
+  }
+  
+  // Hiker validation for open group bookings
+  if (existingHikersInput && validationDiv) {
+    updateHikerCount();
+  }
+  
+  // Validate identity card format (12 digits, numbers only)
+  function isValidIdentityCardFormat(ic) {
+    if (!ic || ic.trim() === '') return false;
+    const trimmedIC = ic.trim();
+    // Check if it's exactly 12 digits and contains only numbers
+    return /^\d{12}$/.test(trimmedIC);
+  }
+
+  // Real-time duplicate identity card validation
+  function checkDuplicateIdentityCards() {
+    if (!hikerDetailsContainer) return;
+    
+    const hikerForms = hikerDetailsContainer.querySelectorAll('.hiker-detail-form');
+    const identityCards = new Map(); // Map of IC -> [array of inputs with that IC]
+    let hasDuplicates = false;
+    let hasInvalidFormat = false;
+    
+    // Clear previous validation
+    hikerForms.forEach((form) => {
+      const icInput = form.querySelector('input[name*="[identityCard]"]');
+      const feedbackDiv = form.querySelector('.identity-card-feedback');
+      if (icInput) {
+        icInput.classList.remove('is-invalid');
+        if (feedbackDiv) {
+          feedbackDiv.style.display = 'none';
+          feedbackDiv.textContent = '';
+        }
+      }
+    });
+    
+    // First pass: Validate format and collect valid identity cards
+    hikerForms.forEach((form) => {
+      const icInput = form.querySelector('input[name*="[identityCard]"]');
+      if (icInput) {
+        const ic = icInput.value.trim();
+        const feedbackDiv = form.querySelector('.identity-card-feedback');
+        
+        // Check format validation
+        if (ic && !isValidIdentityCardFormat(ic)) {
+          hasInvalidFormat = true;
+          icInput.classList.add('is-invalid');
+          if (feedbackDiv) {
+            feedbackDiv.textContent = 'Identity Card must be exactly 12 digits (numbers only).';
+            feedbackDiv.style.display = 'block';
+          }
+        } else if (ic) {
+          // Only add to map if format is valid
+          if (!identityCards.has(ic)) {
+            identityCards.set(ic, []);
+          }
+          identityCards.get(ic).push(icInput);
+        }
+      }
+    });
+    
+    // Second pass: Check for duplicates (only among valid formatted ICs)
+    identityCards.forEach((inputs, ic) => {
+      if (inputs.length > 1) {
+        hasDuplicates = true;
+        inputs.forEach(input => {
+          input.classList.add('is-invalid');
+          const feedbackDiv = input.closest('.hiker-detail-form')?.querySelector('.identity-card-feedback');
+          if (feedbackDiv) {
+            feedbackDiv.textContent = 'This Identity Card is used by another hiker in your list.';
+            feedbackDiv.style.display = 'block';
+          }
+        });
+      }
+    });
+    
+    // Enable/disable submit button based on duplicates or invalid format
+    if (submitButton) {
+      submitButton.disabled = hasDuplicates || hasInvalidFormat;
     }
-
-    // Update max attribute based on existing hikers
-    totalHikerInput.setAttribute('max', maxAllowed);
-
-    // Add validation on input change
-    totalHikerInput.addEventListener('input', validateHikerCount);
-    totalHikerInput.addEventListener('blur', validateHikerCount);
-
-    // Initial validation
-    validateHikerCount();
+  }
+  
+  // Add event listeners for real-time validation
+  if (hikerDetailsContainer) {
+    // Restrict input to numbers only for identity card fields
+    hikerDetailsContainer.addEventListener('input', function(e) {
+      if (e.target && e.target.matches('input[name*="[identityCard]"]')) {
+        // Remove any non-numeric characters
+        e.target.value = e.target.value.replace(/[^0-9]/g, '');
+        // Limit to 12 digits
+        if (e.target.value.length > 12) {
+          e.target.value = e.target.value.substring(0, 12);
+        }
+        checkDuplicateIdentityCards();
+      }
+    });
+    
+    // Also handle paste events
+    hikerDetailsContainer.addEventListener('paste', function(e) {
+      if (e.target && e.target.matches('input[name*="[identityCard]"]')) {
+        setTimeout(() => {
+          e.target.value = e.target.value.replace(/[^0-9]/g, '').substring(0, 12);
+          checkDuplicateIdentityCards();
+        }, 0);
+      }
+    });
+    
+    // Check duplicates on initial load and whenever IC changes
+    checkDuplicateIdentityCards();
   }
 });
 </script>
+
+<?php if (isset($_SESSION['booking_error']) || (isset($_GET['error']) && $_GET['error'] == '1' && isset($_SESSION['booking_error']))): ?>
+<script>
+// On page load, check for duplicates and disable button if needed
+// This handles the case when page is redirected back due to server-side duplicate detection
+document.addEventListener('DOMContentLoaded', function() {
+  // Check duplicates on page load - this will disable the button if duplicates exist
+  if (typeof checkDuplicateIdentityCards === 'function') {
+    checkDuplicateIdentityCards();
+  }
+});
+</script>
+<?php endif; ?>
 
 
 
@@ -2186,5 +2721,15 @@ if (isset($_SESSION['booking_summary'])) {
 }
 if (isset($_SESSION['form_data'])) {
     unset($_SESSION['form_data']);
+}
+// Clear booking error session data
+// Keep it for one page load to ensure JavaScript can display it
+// It will be cleared on the next page load (after user sees it)
+if (isset($_SESSION['booking_error_clear'])) {
+    unset($_SESSION['booking_error']);
+    unset($_SESSION['booking_error_clear']);
+} else if (isset($_SESSION['booking_error'])) {
+    // Mark for clearing on next page load
+    $_SESSION['booking_error_clear'] = true;
 }
 ?>

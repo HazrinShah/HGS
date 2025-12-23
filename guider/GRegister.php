@@ -78,8 +78,10 @@ if ($phoneResult->num_rows > 0) {
 // Move uploaded certificate file
 if (move_uploaded_file($_FILES['certificate']['tmp_name'], $targetPath)) {
     // Set default status to 'pending' until admin validation
-    $insertQuery = "INSERT INTO guider (username, email, certificate, password, gender, phone_number, status)
-                    VALUES ('$username', '$email', '$certificatePath', '$password', '$gender', '$phone', 'pending')";
+    // Set default profile picture for new guiders
+    $defaultProfilePic = 'img/default-guider.jpg';
+    $insertQuery = "INSERT INTO guider (username, email, certificate, password, gender, phone_number, status, profile_picture)
+                    VALUES ('$username', '$email', '$certificatePath', '$password', '$gender', '$phone', 'pending', '$defaultProfilePic')";
 
     if ($conn->query($insertQuery) === TRUE) {
         // Registration successful - redirect to login with success notification

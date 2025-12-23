@@ -70,9 +70,20 @@ if ($bkDateCol) {
 $q = $conn->query("SELECT COUNT(*) AS c FROM booking");
 $totals['bookings_total'] = (int)val($q->fetch_assoc(), 'c', 0); $q->close();
 
-// Booking status counts
+// Booking status counts - with filter support
 $statusCounts = [ 'completed' => 0, 'paid' => 0, 'accepted' => 0, 'pending' => 0, 'cancelled' => 0 ];
+$filterYear = isset($_GET['year']) ? (int)$_GET['year'] : 0;
+$filterMonth = isset($_GET['month']) ? (int)$_GET['month'] : 0;
+
+if ($bkDateCol) {
+  $wheres = [];
+  if ($filterYear > 0) $wheres[] = "YEAR($bkDateCol) = " . $filterYear;
+  if ($filterMonth > 0) $wheres[] = "MONTH($bkDateCol) = " . $filterMonth;
+  $whereSql = count($wheres) ? ("WHERE " . implode(' AND ', $wheres)) : '';
+  $q = $conn->query("SELECT status, COUNT(*) c FROM booking $whereSql GROUP BY status");
+} else {
 $q = $conn->query("SELECT status, COUNT(*) c FROM booking GROUP BY status");
+}
 while ($r = $q->fetch_assoc()) { $statusCounts[strtolower($r['status'])] = (int)$r['c']; }
 $q->close();
 
@@ -95,24 +106,89 @@ if ($bkDateCol) {
   }
 }
 
-// Recent bookings table (latest 20)
+// Recent bookings table with search functionality
 $recent = [];
+$showAllCurrent = isset($_GET['show']) && $_GET['show'] === 'all_current';
+$searchQuery = isset($_GET['search']) ? trim($_GET['search']) : '';
+$dateYear = isset($_GET['date_year']) ? (int)$_GET['date_year'] : 0;
+$dateMonth = isset($_GET['date_month']) ? (int)$_GET['date_month'] : 0;
+$dateDay = isset($_GET['date_day']) ? (int)$_GET['date_day'] : 0;
+
 if ($bkDateCol) {
-  $sql = "SELECT b.bookingID, COALESCE(h.username, CONCAT('Hiker #', b.hikerID)) AS customer,
-                 m.name AS mountain, DATE(b.$bkDateCol) AS dt, b.price, b.status
+  $wheres = [];
+  
+  // Text search functionality
+  if (!empty($searchQuery)) {
+    $searchEscaped = $conn->real_escape_string($searchQuery);
+    $wheres[] = "(
+      b.bookingID LIKE '%{$searchEscaped}%' OR
+      h.username LIKE '%{$searchEscaped}%' OR
+      m.name LIKE '%{$searchEscaped}%' OR
+      g.username LIKE '%{$searchEscaped}%'
+    )";
+  }
+  
+  // Date filter functionality
+  if ($dateYear > 0) {
+    $wheres[] = "YEAR(b.$bkDateCol) = " . $dateYear;
+    
+    if ($dateMonth > 0) {
+      $wheres[] = "MONTH(b.$bkDateCol) = " . $dateMonth;
+      
+      if ($dateDay > 0) {
+        $wheres[] = "DAY(b.$bkDateCol) = " . $dateDay;
+      }
+    }
+  }
+  
+  $whereSql = count($wheres) ? ("WHERE " . implode(' AND ', $wheres)) : '';
+  
+  // "load all" removes LIMIT but keeps the search/filters
+  $limitSql = $showAllCurrent ? '' : 'LIMIT 20';
+  
+  $sql = "SELECT b.bookingID, 
+                 COALESCE(h.username, CONCAT('Hiker #', b.hikerID)) AS customer,
+                 COALESCE(g.username, CONCAT('Guider #', b.guiderID)) AS guider,
+                 m.name AS mountain, 
+                 DATE(b.$bkDateCol) AS dt, 
+                 b.price, 
+                 b.status
           FROM booking b
           LEFT JOIN hiker h ON h.hikerID = b.hikerID
+          LEFT JOIN guider g ON g.guiderID = b.guiderID
           LEFT JOIN mountain m ON m.mountainID = b.mountainID
+          $whereSql
           ORDER BY b.$bkDateCol DESC
-          LIMIT 20";
+          $limitSql";
 } else {
-  $sql = "SELECT b.bookingID, COALESCE(h.username, CONCAT('Hiker #', b.hikerID)) AS customer,
-                 m.name AS mountain, NULL AS dt, b.price, b.status
+  $limitSql = $showAllCurrent ? '' : 'LIMIT 20';
+  
+  $wheres = [];
+  if (!empty($searchQuery)) {
+    $searchEscaped = $conn->real_escape_string($searchQuery);
+    $wheres[] = "(
+      b.bookingID LIKE '%{$searchEscaped}%' OR
+      h.username LIKE '%{$searchEscaped}%' OR
+      m.name LIKE '%{$searchEscaped}%' OR
+      g.username LIKE '%{$searchEscaped}%'
+    )";
+  }
+  $whereSql = count($wheres) ? ("WHERE " . implode(' AND ', $wheres)) : '';
+  
+  $sql = "SELECT b.bookingID, 
+                 COALESCE(h.username, CONCAT('Hiker #', b.hikerID)) AS customer,
+                 COALESCE(g.username, CONCAT('Guider #', b.guiderID)) AS guider,
+                 m.name AS mountain, 
+                 NULL AS dt, 
+                 b.price, 
+                 b.status
           FROM booking b
           LEFT JOIN hiker h ON h.hikerID = b.hikerID
+          LEFT JOIN guider g ON g.guiderID = b.guiderID
           LEFT JOIN mountain m ON m.mountainID = b.mountainID
+          $whereSql
           ORDER BY b.bookingID DESC
-          LIMIT 20";
+          $limitSql";
 }
 if ($r = $conn->query($sql)) { $recent = $r->fetch_all(MYSQLI_ASSOC); $r->close(); }
 
@@ -147,6 +223,19 @@ if ($r = $conn->query($sql)) {
   }
   $r->close();
 }
+
+// Guider KPIs
+$kpi_top_guider_name = '-';
+$kpi_top_guider_bookings = 0;
+$kpi_best_rating_guider_name = '-';
+$kpi_best_rating_value = 0.0;
+$kpi_highest_income_guider_name = '-';
+$kpi_highest_income_value = 0.0;
+$kpi_total_guiders = 0;
+if ($r = $conn->query("SELECT COUNT(*) c FROM guider")) { $kpi_total_guiders = (int)val($r->fetch_assoc(),'c',0); $r->close(); }
+if ($r = $conn->query("SELECT g.username AS name, COUNT(b.bookingID) cnt FROM guider g LEFT JOIN booking b ON b.guiderID=g.guiderID GROUP BY g.guiderID, g.username ORDER BY cnt DESC LIMIT 1")) { $row=$r->fetch_assoc(); if ($row) { $kpi_top_guider_name=$row['name']; $kpi_top_guider_bookings=(int)$row['cnt']; } $r->close(); }
+if ($r = $conn->query("SELECT g.username AS name, COALESCE(AVG(rv.rating),0) avgR FROM guider g LEFT JOIN review rv ON rv.guiderID=g.guiderID GROUP BY g.guiderID, g.username ORDER BY avgR DESC LIMIT 1")) { $row=$r->fetch_assoc(); if ($row) { $kpi_best_rating_guider_name=$row['name']; $kpi_best_rating_value=round((float)$row['avgR'],1); } $r->close(); }
+if ($r = $conn->query("SELECT g.username AS name, COALESCE(SUM(CASE WHEN b.status IN ('paid','completed') THEN b.price ELSE 0 END),0) income FROM guider g LEFT JOIN booking b ON b.guiderID=g.guiderID GROUP BY g.guiderID, g.username ORDER BY income DESC LIMIT 1")) { $row=$r->fetch_assoc(); if ($row) { $kpi_highest_income_guider_name=$row['name']; $kpi_highest_income_value=(float)$row['income']; } $r->close(); }
 
 // Top Mountains by paid revenue (top 5)
 $topMountains = [];
@@ -286,21 +375,52 @@ $bmsPaidArr = array_values($bmsPaid);
 $bmsPendingArr = array_values($bmsPending);
 $bmsCancelledArr = array_values($bmsCancelled);
 
-// Financial chart: last 6 months revenue
-$labels = []; $revenues = [];
-$tmp = [];
+// Active users (last 30 days)
+$activeHikers30d = 0; $activeGuiders30d = isset($activeGuiders30d) ? $activeGuiders30d : 0;
 if ($bkDateCol) {
-  $q = $conn->query("SELECT DATE_FORMAT($bkDateCol,'%Y-%m') ym, COALESCE(SUM(price),0) s
-                     FROM booking WHERE status='paid'
-                     GROUP BY ym ORDER BY ym DESC LIMIT 6");
-  while ($row = $q->fetch_assoc()) { $tmp[$row['ym']] = (float)$row['s']; }
-  $q->close();
+  if ($r = $conn->query("SELECT COUNT(DISTINCT hikerID) c FROM booking WHERE $bkDateCol >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)")) {
+    $activeHikers30d = (int)val($r->fetch_assoc(),'c',0); $r->close();
+  }
+  if ($r = $conn->query("SELECT COUNT(DISTINCT guiderID) c FROM booking WHERE $bkDateCol >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)")) {
+    $activeGuiders30d = (int)val($r->fetch_assoc(),'c',0); $r->close();
+  }
 }
-// Fill last 6 months in chronological order
-for ($i = 5; $i >= 0; $i--) {
-  $ym = date('Y-m', strtotime("-{$i} month"));
-  $labels[] = date('M', strtotime($ym.'-01'));
-  $revenues[] = isset($tmp[$ym]) ? $tmp[$ym] : 0.0;
+
+// Financial KPIs
+$kpi_total_income = 0.0;
+$kpi_last_month_income = 0.0;
+$kpi_bookings_current_month = 0;
+if ($bkDateCol) {
+  // Total income across all time (paid + completed)
+  if ($r = $conn->query("SELECT COALESCE(SUM(price),0) s FROM booking WHERE status IN ('paid','completed')")) {
+    $kpi_total_income = (float)val($r->fetch_assoc(),'s',0); $r->close();
+  }
+  // Last month income (paid + completed)
+  $sql = "SELECT COALESCE(SUM(price),0) s FROM booking 
+          WHERE status IN ('paid','completed') 
+            AND DATE_FORMAT($bkDateCol,'%Y-%m') = DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL 1 MONTH),'%Y-%m')";
+  if ($r = $conn->query($sql)) { $kpi_last_month_income = (float)val($r->fetch_assoc(),'s',0); $r->close(); }
+  // Total bookings current month (all statuses)
+  $sql = "SELECT COUNT(*) c FROM booking 
+          WHERE DATE_FORMAT($bkDateCol,'%Y-%m') = DATE_FORMAT(CURDATE(),'%Y-%m')";
+  if ($r = $conn->query($sql)) { $kpi_bookings_current_month = (int)val($r->fetch_assoc(),'c',0); $r->close(); }
+}
+
+// financial report - Last 6 months data
+$labels = []; $revenues = [];
+if ($bkDateCol) {
+  $sql = "SELECT g.username AS guider, COALESCE(SUM(b.price),0) AS income
+          FROM booking b
+          JOIN guider g ON g.guiderID = b.guiderID
+          WHERE b.status IN ('paid','completed')
+            AND b.$bkDateCol >= DATE_SUB(CURDATE(), INTERVAL 6 MONTH)
+          GROUP BY g.guiderID, g.username
+          ORDER BY income DESC
+          LIMIT 10";
+  if ($r = $conn->query($sql)) {
+    while ($row = $r->fetch_assoc()) { $labels[] = $row['guider']; $revenues[] = (float)$row['income']; }
+    $r->close();
+  }
 }
 
 // Guider doughnut chart data
@@ -392,7 +512,7 @@ $gValues = array_map(fn($x) => (float)$x['revenue'], $topGuiders);
     <nav class="navbar fixed-top">
       <div class="container d-flex align-items-center">
         <button class="mobile-menu-btn me-2" onclick="toggleMobileMenu()"><i class="bi bi-list"></i></button>
-        <a class="navbar-brand d-flex align-items-center" href="../index.html">
+        <a class="navbar-brand d-flex align-items-center" href="../index.php">
           <img src="../img/logo.png" class="img-fluid logo me-2" alt="HGS Logo" style="width: 50px; height: 50px;">
           <span class="fs-6 fw-bold text-white">Admin</span>
         </a>
@@ -409,6 +529,7 @@ $gValues = array_map(fn($x) => (float)$x['revenue'], $topGuiders);
         <a href="AUser.html"><i class="bi bi-people-fill"></i> User</a>
         <a href="AMountain.php"><i class="bi bi-triangle-fill"></i> Mountain</a>
         <a href="AAppeal.php"><i class="bi bi-chat-dots-fill"></i> Appeal</a>
+        <a href="ASentimentReport.php"><i class="fas fa-chart-line"></i> Sentiment Analysis</a>
         <a class="active" href="AReport.php"><i class="bi bi-file-earmark-text-fill"></i> Reports</a>
         <div class="text-center mt-4">
           <form action="../shared/logout.php" method="POST" class="d-flex justify-content-center">
@@ -425,19 +546,6 @@ $gValues = array_map(fn($x) => (float)$x['revenue'], $topGuiders);
           <p class="page-hero-subtitle">View revenue, bookings, guider performance, and user analytics</p>
         </section>
 
-        <!-- Key Metrics -->
-        <div class="report-card" id="keyMetricsReport">
-          <div class="report-header">
-            <h2 class="report-title">Key Metrics</h2>
-          </div>
-          <div class="stats-grid">
-            <div class="stat-item"><div class="stat-number"><?php echo number_format($paidRate, 1); ?>%</div><div class="stat-label">Paid Rate</div></div>
-            <div class="stat-item"><div class="stat-number"><?php echo number_format($cancelRate, 1); ?>%</div><div class="stat-label">Cancellation Rate</div></div>
-            <div class="stat-item"><div class="stat-number"><?php echo number_format($avgRating, 1); ?></div><div class="stat-label">Average Rating</div></div>
-            <div class="stat-item"><div class="stat-number"><?php echo number_format($activeGuiders30d); ?></div><div class="stat-label">Active Guiders (30d)</div></div>
-          </div>
-        </div>
-
         <!-- Financial Report -->
         <div class="report-card" id="financialReport">
           <div class="report-header">
@@ -448,10 +556,9 @@ $gValues = array_map(fn($x) => (float)$x['revenue'], $topGuiders);
             </div>
           </div>
           <div class="stats-grid">
-            <div class="stat-item"><div class="stat-number">RM <?php echo number_format($totals['revenue_total'],2); ?></div><div class="stat-label">Total Revenue</div></div>
-            <div class="stat-item"><div class="stat-number">RM <?php echo number_format($totals['revenue_this_month'],2); ?></div><div class="stat-label">This Month</div></div>
-            <div class="stat-item"><div class="stat-number">RM <?php echo number_format($totals['revenue_last_month'],2); ?></div><div class="stat-label">Last Month</div></div>
-            <div class="stat-item"><div class="stat-number"><?php echo number_format($totals['bookings_total']); ?></div><div class="stat-label">Total Bookings</div></div>
+            <div class="stat-item"><div class="stat-number">RM <?php echo number_format($kpi_total_income,2); ?></div><div class="stat-label">Total Income</div></div>
+            <div class="stat-item"><div class="stat-number">RM <?php echo number_format($kpi_last_month_income,2); ?></div><div class="stat-label">Last Month Income</div></div>
+            <div class="stat-item"><div class="stat-number"><?php echo number_format($kpi_bookings_current_month); ?></div><div class="stat-label">Total Bookings (This Month)</div></div>
           </div>
           <div class="chart-container" style="height:300px;">
             <canvas id="financialChart"></canvas>
@@ -467,6 +574,214 @@ $gValues = array_map(fn($x) => (float)$x['revenue'], $topGuiders);
               <button class="export-btn" onclick="exportReport('bookingReport')"><i class="bi bi-download me-1"></i> Export</button>
             </div>
           </div>
+          <form class="mb-4" method="GET" action="AReport.php" style="background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); padding: 1.5rem; border-radius: 15px; box-shadow: 0 2px 8px rgba(0,0,0,0.06);">
+            <!-- Search Bar -->
+            <div class="row g-3 mb-3">
+              <div class="col-12">
+                <label class="form-label fw-semibold" style="color: #571785;">
+                  <i class="bi bi-search me-2"></i>Search Bookings
+                </label>
+                <div class="input-group input-group-lg">
+                  <span class="input-group-text bg-white border-end-0">
+                    <i class="bi bi-search text-muted"></i>
+                  </span>
+                  <input type="text" 
+                         name="search" 
+                         class="form-control border-start-0 ps-0" 
+                         placeholder="Search by Booking ID, Customer, Mountain, or Guider name..." 
+                         value="<?php echo htmlspecialchars($searchQuery); ?>"
+                         style="font-size: 1rem;">
+                </div>
+              </div>
+            </div>
+            
+            <!-- Date Filter -->
+            <div class="row g-3 mb-3">
+              <div class="col-12">
+                <label class="form-label fw-semibold" style="color: #571785;">
+                  <i class="bi bi-calendar3 me-2"></i>Filter by Date
+                </label>
+              </div>
+              <div class="col-12 col-md-4">
+                <select name="date_year" class="form-select" id="dateYear" onchange="updateDateFilter()">
+                  <option value="">Select Year</option>
+                  <?php 
+                  $currentYear = (int)date('Y');
+                  for ($y = $currentYear; $y >= $currentYear - 5; $y--): 
+                    $selected = ($dateYear === $y) ? 'selected' : '';
+                  ?>
+                    <option value="<?php echo $y; ?>" <?php echo $selected; ?>><?php echo $y; ?></option>
+                <?php endfor; ?>
+              </select>
+            </div>
+              <div class="col-12 col-md-4">
+                <select name="date_month" class="form-select" id="dateMonth" onchange="updateDateFilter()" <?php echo ($dateYear == 0) ? 'disabled' : ''; ?>>
+                  <option value="">Select Month</option>
+                  <?php 
+                  $months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+                  foreach ($months as $idx => $month): 
+                    $monthNum = $idx + 1;
+                    $selected = ($dateMonth === $monthNum) ? 'selected' : '';
+                  ?>
+                    <option value="<?php echo $monthNum; ?>" <?php echo $selected; ?>><?php echo $month; ?></option>
+                  <?php endforeach; ?>
+              </select>
+            </div>
+              <div class="col-12 col-md-4">
+                <select name="date_day" class="form-select" id="dateDay" data-selected="<?php echo $dateDay; ?>" <?php echo ($dateMonth == 0) ? 'disabled' : ''; ?>>
+                  <option value="">Select Day</option>
+                  <!-- Days will be populated by JavaScript based on month/year -->
+                </select>
+              </div>
+            </div>
+            
+            <!-- Action Buttons -->
+            <div class="row g-2">
+              <div class="col-12 d-flex flex-wrap gap-2 justify-content-between align-items-center">
+                <div class="d-flex gap-2">
+                  <button type="submit" class="btn btn-primary px-4">
+                    <i class="bi bi-funnel-fill me-2"></i>Apply Filters
+                  </button>
+                  <?php if (!empty($searchQuery) || $dateYear > 0): ?>
+                    <a href="AReport.php" class="btn btn-outline-secondary px-4">
+                      <i class="bi bi-arrow-counterclockwise me-2"></i>Clear All
+                    </a>
+                  <?php endif; ?>
+                </div>
+                <div class="d-flex gap-2">
+              <?php if ($showAllCurrent): ?>
+                <a href="AReport.php<?php
+                      $params = [];
+                      if (!empty($searchQuery)) $params[] = 'search='.urlencode($searchQuery);
+                      if ($dateYear > 0) $params[] = 'date_year='.$dateYear;
+                      if ($dateMonth > 0) $params[] = 'date_month='.$dateMonth;
+                      if ($dateDay > 0) $params[] = 'date_day='.$dateDay;
+                      echo $params ? '?'.implode('&', $params) : '';
+                    ?>" class="btn btn-warning">
+                      <i class="bi bi-list me-2"></i>Show 20
+                    </a>
+              <?php else: ?>
+                <a href="AReport.php?show=all_current<?php
+                      $params = [];
+                      if (!empty($searchQuery)) $params[] = 'search='.urlencode($searchQuery);
+                      if ($dateYear > 0) $params[] = 'date_year='.$dateYear;
+                      if ($dateMonth > 0) $params[] = 'date_month='.$dateMonth;
+                      if ($dateDay > 0) $params[] = 'date_day='.$dateDay;
+                      echo $params ? '&'.implode('&', $params) : '';
+                    ?>" class="btn btn-success">
+                      <i class="bi bi-list-ul me-2"></i>Load All
+                    </a>
+              <?php endif; ?>
+            </div>
+              </div>
+            </div>
+            
+            <!-- Active Filters Display -->
+            <?php if (!empty($searchQuery) || $dateYear > 0): ?>
+              <div class="mt-3 pt-3 border-top">
+                <small class="text-muted d-block mb-2"><strong>Active Filters:</strong></small>
+                <div class="d-flex flex-wrap gap-2">
+                  <?php if (!empty($searchQuery)): ?>
+                    <span class="badge bg-primary" style="font-size: 0.85rem; padding: 0.5rem 0.75rem;">
+                      <i class="bi bi-search me-1"></i>Search: "<?php echo htmlspecialchars($searchQuery); ?>"
+                    </span>
+                  <?php endif; ?>
+                  <?php if ($dateYear > 0): ?>
+                    <span class="badge bg-info" style="font-size: 0.85rem; padding: 0.5rem 0.75rem;">
+                      <i class="bi bi-calendar3 me-1"></i>
+                      <?php 
+                        echo $dateYear;
+                        if ($dateMonth > 0) echo ' - ' . $months[$dateMonth - 1];
+                        if ($dateDay > 0) echo ' - ' . $dateDay;
+                      ?>
+                    </span>
+                  <?php endif; ?>
+                </div>
+              </div>
+            <?php endif; ?>
+          </form>
+          
+          <script>
+          // Initialize on page load
+          document.addEventListener('DOMContentLoaded', function() {
+            const daySelect = document.getElementById('dateDay');
+            const savedDay = daySelect.getAttribute('data-selected');
+            updateDateFilter(savedDay);
+          });
+          
+          function updateDateFilter(preserveDay) {
+            const year = document.getElementById('dateYear').value;
+            const month = document.getElementById('dateMonth');
+            const day = document.getElementById('dateDay');
+            const currentDayValue = preserveDay || day.value; // Save current selection
+            
+            // Enable/disable month based on year
+            if (year) {
+              month.disabled = false;
+            } else {
+              month.disabled = true;
+              month.value = '';
+              day.disabled = true;
+              day.value = '';
+              populateDays(0, 0, '');
+              return;
+            }
+            
+            // Enable/disable day based on month
+            if (month.value) {
+              day.disabled = false;
+              populateDays(parseInt(year), parseInt(month.value), currentDayValue);
+            } else {
+              day.disabled = true;
+              day.value = '';
+              populateDays(0, 0, '');
+            }
+          }
+          
+          function populateDays(year, month, selectedDay) {
+            const daySelect = document.getElementById('dateDay');
+            const currentValue = selectedDay || daySelect.value || daySelect.getAttribute('data-selected');
+            
+            // Clear existing options except the first one
+            daySelect.innerHTML = '<option value="">Select Day</option>';
+            
+            if (month === 0) return;
+            
+            // Calculate days in month
+            let daysInMonth;
+            
+            if (month === 2) {
+              // February - check for leap year
+              const isLeapYear = (year % 4 === 0 && year % 100 !== 0) || (year % 400 === 0);
+              daysInMonth = isLeapYear ? 29 : 28;
+            } else if ([4, 6, 9, 11].includes(month)) {
+              // April, June, September, November
+              daysInMonth = 30;
+            } else {
+              // January, March, May, July, August, October, December
+              daysInMonth = 31;
+            }
+            
+            // Populate days
+            for (let d = 1; d <= daysInMonth; d++) {
+              const option = document.createElement('option');
+              option.value = d;
+              option.textContent = d;
+              
+              // Restore selection if valid
+              if (currentValue && parseInt(currentValue) === d) {
+                option.selected = true;
+              }
+              
+              daySelect.appendChild(option);
+            }
+            
+            // If previously selected day is now invalid, clear it
+            if (currentValue && parseInt(currentValue) > daysInMonth) {
+              daySelect.value = '';
+            }
+          }
+          </script>
           <div class="stats-grid">
             <div class="stat-item"><div class="stat-number"><?php echo number_format($statusCounts['paid'] + $statusCounts['completed'] ?? 0); ?></div><div class="stat-label">Completed/Paid</div></div>
             <div class="stat-item"><div class="stat-number"><?php echo number_format($statusCounts['pending'] ?? 0); ?></div><div class="stat-label">Pending</div></div>
@@ -475,14 +790,15 @@ $gValues = array_map(fn($x) => (float)$x['revenue'], $topGuiders);
           </div>
           <div class="table-responsive">
             <table class="table">
-              <thead><tr><th>Booking ID</th><th>Customer</th><th>Mountain</th><th>Date</th><th>Amount</th><th>Status</th></tr></thead>
+              <thead><tr><th>Booking ID</th><th>Customer</th><th>Guider</th><th>Mountain</th><th>Date</th><th>Amount</th><th>Status</th></tr></thead>
               <tbody>
                 <?php if (empty($recent)): ?>
-                  <tr><td colspan="6" class="text-center text-muted">No bookings found</td></tr>
+                  <tr><td colspan="7" class="text-center text-muted">No bookings found</td></tr>
                 <?php else: foreach ($recent as $row): $st = strtolower($row['status']); ?>
                   <tr>
                     <td>#<?php echo (int)$row['bookingID']; ?></td>
                     <td><?php echo htmlspecialchars($row['customer'] ?? ''); ?></td>
+                    <td><?php echo htmlspecialchars($row['guider'] ?? ''); ?></td>
                     <td><?php echo htmlspecialchars($row['mountain'] ?? ''); ?></td>
                     <td><?php echo htmlspecialchars($row['dt'] ?? ''); ?></td>
                     <td>RM <?php echo number_format((float)$row['price'], 2); ?></td>
@@ -504,18 +820,18 @@ $gValues = array_map(fn($x) => (float)$x['revenue'], $topGuiders);
             </div>
           </div>
           <div class="stats-grid">
-            <div class="stat-item"><div class="stat-number"><?php echo number_format(count($topGuiders)); ?></div><div class="stat-label">Top Guiders Shown</div></div>
-            <div class="stat-item"><div class="stat-number"><?php echo number_format(array_sum($gValues), 2); ?></div><div class="stat-label">Revenue (Top 5)</div></div>
-            <div class="stat-item"><div class="stat-number"><?php echo number_format(array_sum(array_map(fn($x)=>$x['tours'],$topGuiders))); ?></div><div class="stat-label">Tours (Top 5)</div></div>
-            <div class="stat-item"><div class="stat-number"><?php $r=$conn->query("SELECT COUNT(*) c FROM guider"); echo number_format((int)val($r->fetch_assoc(),'c',0)); $r->close(); ?></div><div class="stat-label">Total Guiders</div></div>
+            <div class="stat-item"><div class="stat-number"><?php echo htmlspecialchars($kpi_top_guider_name); ?></div><div class="stat-label">Top Guider (Most Bookings: <?php echo number_format($kpi_top_guider_bookings); ?>)</div></div>
+            <div class="stat-item"><div class="stat-number"><?php echo htmlspecialchars($kpi_best_rating_guider_name); ?></div><div class="stat-label">Best Rating: <?php echo number_format($kpi_best_rating_value,1); ?></div></div>
+            <div class="stat-item"><div class="stat-number"><?php echo htmlspecialchars($kpi_highest_income_guider_name); ?></div><div class="stat-label">Highest Income: RM <?php echo number_format($kpi_highest_income_value,2); ?></div></div>
+            <div class="stat-item"><div class="stat-number"><?php echo number_format($kpi_total_guiders); ?></div><div class="stat-label">Total Guiders</div></div>
           </div>
           <div class="row g-3">
-            <div class="col-12 col-lg-7">
+            <div class="col-12">
               <div class="chart-container" style="height:320px;">
                 <canvas id="performanceBookingsChart"></canvas>
               </div>
             </div>
-            <div class="col-12 col-lg-5">
+            <div class="col-12">
               <div class="chart-container" style="height:320px;">
                 <canvas id="performanceRatingChart"></canvas>
               </div>
@@ -529,11 +845,23 @@ $gValues = array_map(fn($x) => (float)$x['revenue'], $topGuiders);
             <h2 class="report-title">Mountain Popularity</h2>
             <div class="d-flex align-items-center gap-3">
               <div class="report-icon"><i class="bi bi-bar-chart"></i></div>
+              <div class="btn-group" role="group">
+                <button type="button" class="btn btn-sm btn-outline-primary" id="mountainChartColor" onclick="toggleMountainChartColor(true)" title="Export with Color">
+                  <i class="bi bi-palette"></i> Color
+                </button>
+                <button type="button" class="btn btn-sm btn-outline-secondary active" id="mountainChartBW" onclick="toggleMountainChartColor(false)" title="Export Black & White">
+                  <i class="bi bi-circle"></i> B&W
+                </button>
+              </div>
               <button class="export-btn" onclick="exportReport('mountainReport')"><i class="bi bi-download me-1"></i> Export</button>
             </div>
           </div>
           <div class="chart-container" style="height:360px;">
             <canvas id="mountainPopularityChart"></canvas>
+          </div>
+          <div class="mountain-stats-list" style="margin-top: 20px; padding: 20px; background: #f8f9fa; border-radius: 8px;">
+            <h5 style="margin-bottom: 15px; color: #571785; font-weight: 600;">Mountain Statistics</h5>
+            <div id="mountainPercentagesList"></div>
           </div>
         </div>
       </div>
@@ -542,85 +870,292 @@ $gValues = array_map(fn($x) => (float)$x['revenue'], $topGuiders);
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script>
+    // Track mountain chart color preference
+    let mountainChartUseColor = false;
+    
+    function toggleMountainChartColor(useColor) {
+      mountainChartUseColor = useColor;
+      const colorBtn = document.getElementById('mountainChartColor');
+      const bwBtn = document.getElementById('mountainChartBW');
+      
+      if (useColor) {
+        colorBtn.classList.add('active', 'btn-primary');
+        colorBtn.classList.remove('btn-outline-primary');
+        bwBtn.classList.remove('active', 'btn-secondary');
+        bwBtn.classList.add('btn-outline-secondary');
+      } else {
+        bwBtn.classList.add('active', 'btn-secondary');
+        bwBtn.classList.remove('btn-outline-secondary');
+        colorBtn.classList.remove('active', 'btn-primary');
+        colorBtn.classList.add('btn-outline-primary');
+      }
+    }
+    
     // Export a single report-card by ID to a clean print view
     function exportReport(cardId) {
       try {
         const card = document.getElementById(cardId);
         if (!card) return;
 
-        // Clone the card to avoid mutating original
-        const clone = card.cloneNode(true);
+        // Get report data based on type
+        let reportHTML = '';
+        const now = new Date();
+        const dateStr = now.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+        const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+        
+        switch(cardId) {
+          case 'financialReport':
+            reportHTML = generateFinancialReport(card, dateStr, timeStr);
+            break;
+          case 'bookingReport':
+            reportHTML = generateBookingReport(card, dateStr, timeStr);
+            break;
+          case 'guiderReport':
+            reportHTML = generateGuiderReport(card, dateStr, timeStr);
+            break;
+          case 'mountainReport':
+            reportHTML = generateMountainReport(card, dateStr, timeStr);
+            break;
+          default:
+            reportHTML = generateGenericReport(card, dateStr, timeStr);
+        }
 
-        // Convert canvases inside the clone into images using original canvas data
-        const canvases = card.querySelectorAll('canvas');
-        const cloneCanvases = clone.querySelectorAll('canvas');
-        cloneCanvases.forEach((c, idx) => {
-          const orig = canvases[idx];
-          if (!orig) return;
-          const img = document.createElement('img');
-          try { img.src = orig.toDataURL('image/png'); } catch (e) {}
-          img.style.maxWidth = '100%';
-          img.style.display = 'block';
-          img.style.margin = '10px 0';
-          c.replaceWith(img);
-        });
-
-        // Build print document
+        // Open print window
         const win = window.open('', '_blank');
         if (!win) return;
-        const styles = `
-          <style>
-            @page { size: A4; margin: 18mm; }
-            body { font-family: Montserrat, Arial, sans-serif; color: #111827; }
-            .report { width: 100%; }
-            .header { text-align: center; margin-bottom: 16px; }
-            .title { font-size: 22px; font-weight: 800; color: #571785; margin: 0; }
-            .subtitle { font-size: 12px; color: #6b7280; margin: 4px 0 0 0; }
-            .content { background:#fff; border:1px solid #eee; border-radius:12px; padding:18px; }
-            table { width: 100%; border-collapse: collapse; }
-            th, td { border: 1px solid #e5e7eb; padding: 8px 10px; font-size: 12px; }
-            th { background: #571785; color: #fff; text-align: left; }
-            .stats-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 12px; }
-            .stat-item { border:1px solid #e5e7eb; border-radius:10px; padding:12px; }
-            .stat-number { font-size: 18px; color:#571785; font-weight:700; margin-bottom:4px; }
-            .stat-label { font-size: 12px; color:#6b7280; font-weight:600; }
-          </style>
-        `;
-        const title = clone.querySelector('.report-title')?.textContent || 'Report';
-        win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${title}</title>${styles}</head><body>`);
-        win.document.write(`<div class="report"><div class="header"><h1 class="title">${title}</h1><p class="subtitle">Generated ${new Date().toLocaleString()}</p></div>`);
-        win.document.write(`<div class="content">${clone.innerHTML}</div></div>`);
-        win.document.write('</body></html>');
+        
+        win.document.write(reportHTML);
         win.document.close();
-        // Give the browser a tick to render images
-        setTimeout(() => { win.focus(); win.print(); win.close(); }, 300);
+        
+        // Give browser time to render
+        setTimeout(() => { win.focus(); win.print(); }, 800);
       } catch (e) {
         console.error('Export failed', e);
-        window.print();
+        alert('Failed to generate report. Please try again.');
       }
     }
-    // Financial Chart (Revenue Trend) - same data, improved styling
+
+    function generateFinancialReport(card, dateStr, timeStr) {
+      // Extract stats and create table
+      const stats = card.querySelectorAll('.stat-item');
+      let statsTable = '<table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>';
+      stats.forEach(stat => {
+        const label = stat.querySelector('.stat-label')?.textContent || '';
+        const number = stat.querySelector('.stat-number')?.textContent || '';
+        statsTable += `<tr><td>${label}</td><td>${number}</td></tr>`;
+      });
+      statsTable += '</tbody></table>';
+      
+      // Get chart image (convert to grayscale)
+      const canvas = card.querySelector('canvas');
+      let chartHTML = '';
+      if (canvas) {
+        const chartImg = canvas.toDataURL('image/png');
+        chartHTML = `<div class="chart-section"><h3 class="section-title">Revenue Analysis Chart</h3><img src="${chartImg}" class="bw-chart" style="max-width:100%; height:auto;"></div>`;
+      }
+      
+      return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Financial Report</title>${getFormalPrintStyles()}</head><body>
+${getFormalReportHeader('FINANCIAL REPORT', dateStr, timeStr)}
+<div class="section"><h3 class="section-title">Financial Overview</h3>${statsTable}</div>
+${chartHTML}
+${getFormalReportFooter()}</body></html>`;
+    }
+
+    function generateBookingReport(card, dateStr, timeStr) {
+      // Extract stats and create table
+      const stats = card.querySelectorAll('.stat-item');
+      let statsTable = '<table><thead><tr><th>Status</th><th>Count</th></tr></thead><tbody>';
+      stats.forEach(stat => {
+        const label = stat.querySelector('.stat-label')?.textContent || '';
+        const number = stat.querySelector('.stat-number')?.textContent || '';
+        statsTable += `<tr><td>${label}</td><td>${number}</td></tr>`;
+      });
+      statsTable += '</tbody></table>';
+      
+      // Extract booking table (remove all interface elements)
+      const table = card.querySelector('table');
+      let tableHTML = '';
+      if (table) {
+        const clone = table.cloneNode(true);
+        // Remove all interface elements
+        clone.querySelectorAll('button, form, input, select, .btn, .badge').forEach(el => el.remove());
+        // Clean up status badges - just show text
+        clone.querySelectorAll('.status-badge').forEach(badge => {
+          badge.outerHTML = badge.textContent.trim();
+        });
+        tableHTML = clone.outerHTML;
+      }
+      
+      return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Booking Report</title>${getFormalPrintStyles()}</head><body>
+${getFormalReportHeader('BOOKING REPORT', dateStr, timeStr)}
+<div class="section"><h3 class="section-title">Booking Statistics</h3>${statsTable}</div>
+${tableHTML ? `<div class="section"><h3 class="section-title">Booking Details</h3>${tableHTML}</div>` : ''}
+${getFormalReportFooter()}</body></html>`;
+    }
+
+    function generateGuiderReport(card, dateStr, timeStr) {
+      // Extract stats and create table
+      const stats = card.querySelectorAll('.stat-item');
+      let statsTable = '<table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>';
+      stats.forEach(stat => {
+        const label = stat.querySelector('.stat-label')?.textContent || '';
+        const number = stat.querySelector('.stat-number')?.textContent || '';
+        statsTable += `<tr><td>${label}</td><td>${number}</td></tr>`;
+      });
+      statsTable += '</tbody></table>';
+      
+      // Get charts
+      const canvases = card.querySelectorAll('canvas');
+      let chartsHTML = '';
+      if (canvases.length > 0) {
+        chartsHTML = '<div class="section"><h3 class="section-title">Performance Charts</h3>';
+        canvases.forEach((canvas, idx) => {
+          const imgData = canvas.toDataURL('image/png');
+          const titles = ['Total Bookings per Guider', 'Average Rating per Guider'];
+          chartsHTML += `<div class="chart-section"><h4 class="chart-title">${titles[idx] || 'Chart'}</h4><img src="${imgData}" class="bw-chart" style="max-width:100%; height:auto;"></div>`;
+        });
+        chartsHTML += '</div>';
+      }
+      
+      return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Guider Performance Report</title>${getFormalPrintStyles()}</head><body>
+${getFormalReportHeader('GUIDER PERFORMANCE REPORT', dateStr, timeStr)}
+<div class="section"><h3 class="section-title">Performance Metrics</h3>${statsTable}</div>
+${chartsHTML}
+${getFormalReportFooter()}</body></html>`;
+    }
+
+    function generateMountainReport(card, dateStr, timeStr) {
+      // Get chart
+      const canvas = card.querySelector('#mountainPopularityChart');
+      let chartHTML = '';
+      if (canvas) {
+        const chartImg = canvas.toDataURL('image/png');
+        const chartClass = mountainChartUseColor ? '' : 'bw-chart';
+        chartHTML = `<div class="section"><h3 class="section-title">Popularity Distribution</h3><div class="chart-section"><img src="${chartImg}" class="${chartClass}" style="max-width:100%; height:auto;"></div></div>`;
+      }
+      
+      // Get mountain data and calculate percentages
+      const mpLabels = <?php echo json_encode($mpLabels); ?>;
+      const mpValues = <?php echo json_encode($mpValues); ?>;
+      const colors = ['#571785', '#6f42c1', '#17a2b8', '#28a745', '#ffc107', '#fd7e14', '#dc3545', '#20c997', '#0dcaf0', '#6610f2'];
+      
+      const total = mpValues.reduce((a, b) => a + b, 0);
+      let percentagesHTML = '';
+      
+      if (total > 0 && mpLabels.length > 0) {
+        percentagesHTML = '<table><thead><tr><th>Mountain</th><th>Bookings</th><th>Percentage</th></tr></thead><tbody>';
+        mpLabels.forEach((label, idx) => {
+          const value = mpValues[idx] || 0;
+          const percentage = ((value / total) * 100).toFixed(1);
+          const color = colors[idx % colors.length];
+          percentagesHTML += `<tr>
+            <td>
+              <span class="color-indicator" style="display:inline-block;width:12px;height:12px;background-color:${mountainChartUseColor ? color : '#000000'};border:1px solid #000000;margin-right:8px;vertical-align:middle;"></span>
+              ${label}
+            </td>
+            <td>${value}</td>
+            <td><strong>${percentage}%</strong></td>
+          </tr>`;
+        });
+        percentagesHTML += '</tbody></table>';
+      }
+      
+      return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Mountain Popularity Report</title>${getFormalPrintStyles()}</head><body>
+${getFormalReportHeader('MOUNTAIN POPULARITY REPORT', dateStr, timeStr)}
+${chartHTML}
+${percentagesHTML ? `<div class="section"><h3 class="section-title">Mountain Statistics with Percentages</h3>${percentagesHTML}</div>` : ''}
+${getFormalReportFooter()}</body></html>`;
+    }
+
+    function getFormalReportHeader(title, dateStr, timeStr) {
+      return `<div class="report-header">
+<div class="company-info">
+<h1 class="company-name">HIKING GUIDANCE SYSTEM</h1>
+<p class="company-tagline">Administrative Reports & Analytics</p>
+</div>
+<div class="report-meta">
+<h2 class="report-title">${title}</h2>
+<div class="report-date"><span><strong>Date:</strong> ${dateStr}</span><span><strong>Time:</strong> ${timeStr}</span></div>
+</div></div><div class="divider"></div>`;
+    }
+
+    function getFormalReportFooter() {
+      return `<div class="report-footer"><div class="footer-content">
+<p><strong>Hiking Guidance System</strong> - Administrative Dashboard</p>
+<p>This is a computer-generated report. No signature required.</p>
+<p class="confidential">CONFIDENTIAL - For Internal Use Only</p>
+</div></div>`;
+    }
+
+    function getFormalPrintStyles() {
+      return `<style>
+@page { size: A4; margin: 20mm; }
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Times New Roman', Times, serif; font-size: 11pt; color: #000000; line-height: 1.5; background: #ffffff; }
+.report-header { margin-bottom: 25px; }
+.company-info { text-align: center; margin-bottom: 20px; padding: 10px 0; border-bottom: 2px solid #000000; }
+.company-name { font-size: 18pt; font-weight: bold; margin-bottom: 5px; color: #000000; }
+.company-tagline { font-size: 10pt; color: #000000; }
+.report-meta { text-align: center; margin-top: 15px; }
+.report-title { font-size: 16pt; font-weight: bold; margin-bottom: 10px; text-transform: uppercase; color: #000000; }
+.report-date { display: flex; justify-content: center; gap: 30px; font-size: 10pt; color: #000000; margin-top: 5px; }
+.divider { height: 1px; background: #000000; margin: 20px 0; }
+.section { margin: 20px 0; page-break-inside: avoid; }
+.section-title { font-size: 12pt; font-weight: bold; color: #000000; margin-bottom: 12px; padding-bottom: 5px; border-bottom: 1px solid #000000; }
+table { width: 100%; border-collapse: collapse; margin: 15px 0; font-size: 10pt; border: 1px solid #000000; }
+thead { background: #ffffff; }
+th { padding: 8px 10px; text-align: left; font-weight: bold; font-size: 10pt; border: 1px solid #000000; background: #f0f0f0; color: #000000; }
+td { padding: 8px 10px; border: 1px solid #000000; color: #000000; }
+tbody tr:nth-child(even) { background: #f9f9f9; }
+tbody tr:nth-child(odd) { background: #ffffff; }
+.chart-section { margin: 20px 0; page-break-inside: avoid; text-align: center; }
+.chart-title { font-size: 11pt; font-weight: bold; color: #000000; margin-bottom: 10px; }
+.bw-chart { filter: grayscale(100%); -webkit-filter: grayscale(100%); }
+.report-footer { margin-top: 40px; padding-top: 15px; border-top: 1px solid #000000; text-align: center; font-size: 9pt; color: #000000; }
+.footer-content p { margin: 3px 0; }
+.confidential { font-weight: bold; color: #000000; margin-top: 10px; }
+.color-indicator { display: inline-block; width: 12px; height: 12px; border: 1px solid #000000; margin-right: 8px; vertical-align: middle; }
+button, form, input, select, .btn, .badge, .export-btn, .report-icon { display: none !important; }
+@media print {
+  body { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+  .section { page-break-inside: avoid; }
+  @page { margin: 20mm; }
+}
+</style>`;
+    }
+
+    // Keep old functions for backward compatibility
+    function getReportHeader(title, dateStr, timeStr) {
+      return getFormalReportHeader(title, dateStr, timeStr);
+    }
+
+    function getReportFooter() {
+      return getFormalReportFooter();
+    }
+
+    function getPrintStyles() {
+      return getFormalPrintStyles();
+    }
+
+    function generateGenericReport(card, dateStr, timeStr) {
+      const clone = card.cloneNode(true);
+      // Remove all interface elements
+      clone.querySelectorAll('button, form, input, select, .btn, .badge, .export-btn, .report-icon').forEach(el => el.remove());
+      const title = clone.querySelector('.report-title')?.textContent || 'Report';
+      return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${title}</title>${getFormalPrintStyles()}</head><body>${getFormalReportHeader(title.toUpperCase(), dateStr, timeStr)}<div class="section">${clone.innerHTML}</div>${getFormalReportFooter()}</body></html>`;
+    }
+    // Financial Chart: Current Month Income per Guider (Bar)
     const finLabels = <?php echo json_encode($labels); ?>;
     const finData = <?php echo json_encode($revenues); ?>;
-    const finCtx = document.getElementById('financialChart').getContext('2d');
-    const finGradient = finCtx.createLinearGradient(0, 0, 0, 300);
-    finGradient.addColorStop(0, 'rgba(87, 23, 133, 0.25)');
-    finGradient.addColorStop(1, 'rgba(87, 23, 133, 0.02)');
-    new Chart(finCtx, {
-      type: 'line',
+    new Chart(document.getElementById('financialChart'), {
+      type: 'bar',
       data: {
         labels: finLabels,
         datasets: [{
-          label: 'Revenue (RM)',
+          label: 'Income (Last 6 Months) - RM',
           data: finData,
-          borderColor: '#571785',
-          backgroundColor: finGradient,
-          borderWidth: 3,
-          pointRadius: 3,
-          pointHoverRadius: 5,
-          pointBackgroundColor: '#571785',
-          tension: 0.35,
-          fill: true
+          backgroundColor: '#571785',
+          borderRadius: 6
         }]
       },
       options: {
@@ -631,22 +1166,24 @@ $gValues = array_map(fn($x) => (float)$x['revenue'], $topGuiders);
           tooltip: {
             callbacks: {
               label: function(ctx) {
-                const v = ctx.parsed.y || 0;
-                return 'RM ' + Number(v).toLocaleString(undefined, { minimumFractionDigits: 0 });
+                const v = ctx.parsed.x || 0;
+                return 'RM ' + Number(v).toLocaleString('en-MY', {minimumFractionDigits: 2, maximumFractionDigits: 2});
               }
             }
           }
         },
         scales: {
-          y: {
+          x: {
             beginAtZero: true,
-            ticks: {
-              callback: function(value) { return 'RM ' + Number(value).toLocaleString(); }
-            },
+            ticks: { callback: (v) => 'RM ' + Number(v).toLocaleString() },
             grid: { color: 'rgba(0,0,0,0.06)' }
           },
-          x: { grid: { display: false } }
-        }
+          y: {
+            ticks: { autoSkip: false },
+            grid: { display: false }
+          }
+        },
+        indexAxis: 'y'
       }
     });
 
@@ -744,6 +1281,43 @@ $gValues = array_map(fn($x) => (float)$x['revenue'], $topGuiders);
         }
       }
     });
+
+    // Populate mountain percentages list with color indicators
+    function populateMountainPercentages() {
+      const mpLabels = <?php echo json_encode($mpLabels); ?>;
+      const mpValues = <?php echo json_encode($mpValues); ?>;
+      const colors = ['#571785', '#6f42c1', '#17a2b8', '#28a745', '#ffc107', '#fd7e14', '#dc3545', '#20c997', '#0dcaf0', '#6610f2'];
+      const listContainer = document.getElementById('mountainPercentagesList');
+      
+      if (!listContainer || mpLabels.length === 0) return;
+      
+      const total = mpValues.reduce((a, b) => a + b, 0);
+      if (total === 0) return;
+      
+      let html = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;">';
+      mpLabels.forEach((label, idx) => {
+        const value = mpValues[idx] || 0;
+        const percentage = ((value / total) * 100).toFixed(1);
+        const color = colors[idx % colors.length];
+        
+        html += `<div style="display:flex;align-items:center;padding:12px;background:white;border-radius:8px;border-left:4px solid ${color};box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+          <span style="display:inline-block;width:16px;height:16px;background-color:${color};border-radius:4px;margin-right:12px;border:1px solid rgba(0,0,0,0.1);flex-shrink:0;"></span>
+          <div style="flex:1;min-width:0;">
+            <div style="font-weight:600;color:#333;font-size:13px;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${label}</div>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span style="font-size:16px;font-weight:700;color:#571785;">${percentage}%</span>
+              <span style="font-size:11px;color:#666;">(${value})</span>
+            </div>
+          </div>
+        </div>`;
+      });
+      html += '</div>';
+      
+      listContainer.innerHTML = html;
+    }
+    
+    // Populate on page load
+    populateMountainPercentages();
 
     // Sidebar controls
     function toggleMobileMenu(){ const s=document.querySelector('.sidebar'); const o=document.querySelector('.mobile-overlay'); const b=document.querySelector('.mobile-menu-btn'); if(!s||!o)return; const on=s.classList.toggle('mobile-open'); o.classList.toggle('show',on); const i=b&&b.querySelector('i'); if(i) i.className=on?'bi bi-x':'bi bi-list'; }

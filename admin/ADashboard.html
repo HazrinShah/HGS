@@ -273,6 +273,35 @@
       text-align: center;
       margin-bottom: 10px;
     }
+    
+    /* Page Hero Header */
+    .page-hero {
+      background: linear-gradient(180deg, #f6f8ff 0%, #f7fbff 100%);
+      border-radius: 20px;
+      padding: 40px 20px;
+      margin-bottom: 30px;
+      text-align: center;
+      box-shadow: 0 6px 18px rgba(87, 23, 133, 0.06);
+      border: 1px solid rgba(87, 23, 133, 0.08);
+    }
+    
+    .page-hero-title {
+      font-size: 2.5rem;
+      font-weight: 700;
+      margin: 0 0 8px 0;
+      background: linear-gradient(135deg, #4a0f6b, #571785);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      letter-spacing: 0.2px;
+    }
+    
+    .page-hero-subtitle {
+      color: #64748b;
+      font-weight: 500;
+      font-size: 1.05rem;
+      margin: 0;
+    }
 
     .dashboard-card {
       background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
@@ -323,13 +352,16 @@
       margin-bottom: 40px;
     }
 
+    /* Modern Colorful Stat Cards */
     .stat-card {
-      background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
+      background: white;
       border-radius: 20px;
-      padding: 25px;
-      text-align: center;
-      box-shadow: 0 8px 32px rgba(87, 23, 133, 0.15);
-      border: 2px solid rgba(87, 23, 133, 0.1);
+      padding: 30px 25px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+      border: none;
       transition: all 0.3s ease;
       position: relative;
       overflow: hidden;
@@ -341,56 +373,90 @@
       top: 0;
       left: 0;
       right: 0;
-      height: 4px;
-      background: linear-gradient(90deg, #571785, #4a0f6b);
+      height: 5px;
+      transition: height 0.3s ease;
     }
 
+    .stat-card:nth-child(1)::before { background: linear-gradient(90deg, #571785, #4a0f6b); }
+    .stat-card:nth-child(2)::before { background: linear-gradient(90deg, #571785, #4a0f6b); }
+    .stat-card:nth-child(3)::before { background: linear-gradient(90deg, #571785, #4a0f6b); }
+    .stat-card:nth-child(4)::before { background: linear-gradient(90deg, #571785, #4a0f6b); }
+
     .stat-card:hover {
-      transform: translateY(-5px);
-      box-shadow: 0 12px 40px rgba(87, 23, 133, 0.25);
+      transform: translateY(-8px);
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
+    }
+
+    .stat-card:hover::before {
+      height: 8px;
     }
 
     .stat-icon {
-      width: 60px;
-      height: 60px;
-      border-radius: 50%;
+      width: 70px;
+      height: 70px;
+      border-radius: 18px;
       display: flex;
       align-items: center;
       justify-content: center;
-      margin: 0 auto 15px;
-      font-size: 24px;
+      margin-bottom: 20px;
+      font-size: 28px;
       color: white;
+      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.15);
     }
 
-    .stat-icon.revenue { background: linear-gradient(135deg, #28a745, #20c997); }
-    .stat-icon.bookings { background: linear-gradient(135deg, #571785, #4a0f6b); }
-    .stat-icon.users { background: linear-gradient(135deg, #17a2b8, #6f42c1); }
-    .stat-icon.guiders { background: linear-gradient(135deg, #ffc107, #fd7e14); }
+    .stat-icon.revenue { 
+      background: linear-gradient(135deg, #571785 0%, #4a0f6b 100%);
+    }
+    .stat-icon.bookings { 
+      background: linear-gradient(135deg, #571785 0%, #4a0f6b 100%);
+    }
+    .stat-icon.users { 
+      background: linear-gradient(135deg, #571785 0%, #4a0f6b 100%);
+    }
+    .stat-icon.guiders { 
+      background: linear-gradient(135deg, #571785 0%, #4a0f6b 100%);
+    }
 
     .stat-number {
-      font-size: 2.8rem;
-      font-weight: 700;
-      color: #571785;
+      font-size: 2.2rem;
+      font-weight: 800;
       margin-bottom: 8px;
-      text-shadow: 1px 1px 2px rgba(0,0,0,0.1);
+      line-height: 1;
+      word-break: break-word;
     }
 
+    .stat-card:nth-child(1) .stat-number { color: #571785; }
+    .stat-card:nth-child(2) .stat-number { color: #571785; }
+    .stat-card:nth-child(3) .stat-number { color: #571785; }
+    .stat-card:nth-child(4) .stat-number { color: #571785; }
+
     .stat-label {
-      font-size: 1rem;
-      color: #666;
-      font-weight: 600;
+      font-size: 0.875rem;
+      color: #64748b;
+      font-weight: 700;
       text-transform: uppercase;
-      letter-spacing: 1px;
+      letter-spacing: 0.5px;
+      margin-bottom: 10px;
     }
 
     .stat-change {
-      font-size: 0.9rem;
-      margin-top: 8px;
-      font-weight: 500;
+      font-size: 0.875rem;
+      font-weight: 600;
+      padding: 6px 12px;
+      border-radius: 20px;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
     }
 
-    .stat-change.positive { color: #28a745; }
-    .stat-change.negative { color: #dc3545; }
+    .stat-change.positive { 
+      color: #059669;
+      background: #d1fae5;
+    }
+    .stat-change.negative { 
+      color: #dc2626;
+      background: #fee2e2;
+    }
 
     .chart-header {
       display: flex;
@@ -447,33 +513,32 @@
 <body>
 
 
-  <!-- Mobile Overlay -->
   <div class="mobile-overlay" onclick="closeMobileMenu()"></div>
 
-  <!-- Header -->
+
     <header>
     <nav class="navbar fixed-top">
         <div class="container d-flex align-items-center">
-        <!-- Hamburger inside header (mobile only) -->
+        
         <button class="mobile-menu-btn me-2" onclick="toggleMobileMenu()">
           <i class="bi bi-list"></i>
         </button>
-        <!-- Logo and Admin text (left side) -->
-        <a class="navbar-brand d-flex align-items-center" href="../index.html">
+        
+        <a class="navbar-brand d-flex align-items-center" href="../">
             <img src="../img/logo.png" class="img-fluid logo me-2" alt="HGS Logo" style="width: 50px; height: 50px;">
             <span class="fs-6 fw-bold text-white">Admin</span>
         </a>
 
-        <!-- Title centered -->
+        
         <h1 class="navbar-title ms-auto me-auto">HIKING GUIDANCE SYSTEM</h1>
         </div>
     </nav>
     </header>
-    <!-- End Header -->
+    
 
 
   <div class="wrapper">
-    <!-- Sidebar -->
+    
     <div class="sidebar">
         <div class="logo-admin">
         <strong class="ms-2 text-white">Menu</strong>
@@ -483,6 +548,7 @@
         <a href="AUser.html"><i class="bi bi-people-fill"></i> User</a>
         <a href="AMountain.php"><i class="bi bi-triangle-fill"></i> Mountain</a>
         <a href="AAppeal.php"><i class="bi bi-chat-dots-fill"></i> Appeal</a>
+        <a href="ASentimentReport.php"><i class="fas fa-chart-line"></i> Sentiment Analysis</a>
         <a href="AReport.php"><i class="bi bi-file-earmark-text-fill"></i> Reports</a>
         <div class="text-center mt-4">
             <form action="../shared/logout.php" method="POST" class="d-flex justify-content-center">
@@ -494,18 +560,25 @@
         </div>
     </div>
 
-  <!-- Main Content -->
+    
     <div class="main-content">
     <div class="container">
-        <!-- Key Metrics Overview -->
+        
+        <!-- Page Hero Header -->
+        <div class="page-hero">
+            <h1 class="page-hero-title">
+                <i class="fas fa-chart-pie"></i> Admin Dashboard
+            </h1>
+            <p class="page-hero-subtitle">Real-time overview of your hiking guidance system</p>
+        </div>
+        
         <div class="stats-overview">
             <div class="stat-card">
                 <div class="stat-icon revenue">
                     <i class="bi bi-currency-dollar"></i>
                 </div>
                 <div class="stat-number" id="totalRevenue">$0</div>
-                <div class="stat-label">Total Revenue</div>
-                <div class="stat-change positive" id="revenueChange">+12% from last month</div>
+                <div class="stat-label">Total Income</div>
             </div>
             <div class="stat-card">
                 <div class="stat-icon bookings">
@@ -513,7 +586,6 @@
                 </div>
                 <div class="stat-number" id="totalBookings">0</div>
                 <div class="stat-label">Total Bookings</div>
-                <div class="stat-change positive" id="bookingChange">+8% from last month</div>
             </div>
             <div class="stat-card">
                 <div class="stat-icon users">
@@ -521,7 +593,6 @@
                 </div>
                 <div class="stat-number" id="totalUsers">0</div>
                 <div class="stat-label">Active Users</div>
-                <div class="stat-change positive" id="userChange">+15% from last month</div>
             </div>
             <div class="stat-card">
                 <div class="stat-icon guiders">
@@ -529,11 +600,10 @@
                 </div>
                 <div class="stat-number" id="activeGuiders">0</div>
                 <div class="stat-label">Active Guiders</div>
-                <div class="stat-change positive" id="guiderChange">+5% from last month</div>
             </div>
         </div>
 
-        <!-- Charts Section -->
+
         <div class="row g-4">
         <div class="col-lg-8">
             <div class="dashboard-card">
@@ -618,14 +688,13 @@
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script>
-  // Chart.js configuration
+
   Chart.defaults.font.family = 'Montserrat, sans-serif';
   Chart.defaults.color = '#571785';
 
   let dashboardData = null;
   let charts = {};
 
-  // Fetch dashboard data
   async function fetchDashboardData(year = '', month = '') {
     try {
       let url = 'ADashboardData.php';
@@ -643,35 +712,30 @@
       createCharts();
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
-      // Fallback to dummy data if API fails
       createDummyCharts();
     }
   }
 
-  // Update statistics cards
   function updateStats() {
     if (!dashboardData) return;
 
-    // Total Revenue
     const totalRevenue = dashboardData.financial.total_revenue;
     document.getElementById('totalRevenue').textContent = 'RM' + totalRevenue.toLocaleString();
 
-    // Total Bookings
     const totalBookings = dashboardData.bookings.status_counts.reduce((sum, count) => sum + count, 0);
     document.getElementById('totalBookings').textContent = totalBookings.toLocaleString();
 
-    // Total Users
     const totalUsers = dashboardData.users.user_counts.reduce((sum, count) => sum + count, 0);
     document.getElementById('totalUsers').textContent = totalUsers.toLocaleString();
 
-    // Active Guiders
     const activeGuiders = dashboardData.performance.guider_names.length;
     document.getElementById('activeGuiders').textContent = activeGuiders;
   }
-
-  // Create Revenue Trends Chart (Area Chart)
   function createRevenueChart() {
     const ctx = document.getElementById('revenueChart').getContext('2d');
+    if (charts.revenue) {
+      charts.revenue.destroy();
+    }
     charts.revenue = new Chart(ctx, {
       type: 'line',
       data: {
@@ -679,13 +743,13 @@
         datasets: [{
           label: 'Revenue',
           data: dashboardData.financial.monthly_revenue.length > 0 ? dashboardData.financial.monthly_revenue : [dashboardData.financial.total_revenue],
-          borderColor: '#571785',
-          backgroundColor: 'rgba(87, 23, 133, 0.2)',
+          borderColor: '#10b981',
+          backgroundColor: 'rgba(16, 185, 129, 0.2)',
           borderWidth: 3,
           tension: 0.4,
           fill: true,
-          pointBackgroundColor: '#4a0f6b',
-          pointBorderColor: '#571785',
+          pointBackgroundColor: '#059669',
+          pointBorderColor: '#10b981',
           pointBorderWidth: 3,
           pointRadius: 6,
           pointHoverRadius: 8
@@ -703,17 +767,21 @@
           y: {
             beginAtZero: true,
             grid: {
-              color: 'rgba(87, 23, 133, 0.1)'
+              color: 'rgba(16, 185, 129, 0.1)'
             },
             ticks: {
               callback: function(value) {
                 return 'RM' + (value / 1000) + 'K';
-              }
+              },
+              color: '#059669'
             }
           },
           x: {
             grid: {
-              color: 'rgba(87, 23, 133, 0.1)'
+              color: 'rgba(16, 185, 129, 0.1)'
+            },
+            ticks: {
+              color: '#059669'
             }
           }
         }
@@ -721,23 +789,33 @@
     });
   }
 
-  // Create Booking Status Chart (Doughnut Chart)
+  
   function createBookingStatusChart() {
     const ctx = document.getElementById('bookingStatusChart').getContext('2d');
+    
+    // Define color mapping for each status
+    const statusColorMap = {
+      'Completed': '#10b981',   // Green
+      'Pending': '#f59e0b',     // Yellow
+      'Cancelled': '#ef4444',   // Red
+      'In Progress': '#3b82f6'  // Blue
+    };
+    
+    // Map colors based on actual status labels from backend
+    const labels = dashboardData.bookings.status_labels || ['Completed', 'Pending', 'Cancelled', 'In Progress'];
+    const colors = labels.map(label => statusColorMap[label] || '#6b7280');
+    
     charts.bookingStatus = new Chart(ctx, {
       type: 'doughnut',
       data: {
-        labels: dashboardData.bookings.status_labels || ['Completed', 'Pending', 'Cancelled', 'In Progress'],
+        labels: labels,
         datasets: [{
           data: dashboardData.bookings.status_counts || [45, 25, 15, 10],
-          backgroundColor: [
-            '#28a745',
-            '#ffc107',
-            '#dc3545',
-            '#17a2b8'
-          ],
-          borderWidth: 0,
-          hoverOffset: 15
+          backgroundColor: colors,
+          borderWidth: 4,
+          borderColor: '#fff',
+          hoverOffset: 15,
+          hoverBorderWidth: 5
         }]
       },
       options: {
@@ -750,8 +828,10 @@
               padding: 20,
               usePointStyle: true,
               font: {
-                size: 12
-              }
+                size: 13,
+                weight: '600'
+              },
+              color: '#1f2937'
             }
           }
         }
@@ -759,7 +839,6 @@
     });
   }
 
-  // Create Guider Performance Chart (Horizontal Bar Chart)
   function createGuiderPerformanceChart() {
     const ctx = document.getElementById('guiderPerformanceChart').getContext('2d');
     charts.guiderPerformance = new Chart(ctx, {
@@ -770,14 +849,15 @@
           label: 'Rating',
           data: dashboardData.performance.guider_ratings.slice(0, 5) || [4.8, 4.6, 4.4, 4.2, 4.0],
           backgroundColor: [
-            'rgba(87, 23, 133, 0.8)',
-            'rgba(111, 72, 138, 0.8)',
-            'rgba(139, 74, 156, 0.8)',
-            'rgba(166, 107, 181, 0.8)',
-            'rgba(196, 163, 214, 0.8)'
+            'rgba(236, 72, 153, 0.8)',   // Pink
+            'rgba(139, 92, 246, 0.8)',   // Purple
+            'rgba(59, 130, 246, 0.8)',   // Blue
+            'rgba(16, 185, 129, 0.8)',   // Green
+            'rgba(245, 158, 11, 0.8)'    // Orange
           ],
-          borderRadius: 8,
-          borderSkipped: false
+          borderRadius: 10,
+          borderSkipped: false,
+          barThickness: 30
         }]
       },
       options: {
@@ -794,15 +874,22 @@
             beginAtZero: true,
             max: 5,
             grid: {
-              color: 'rgba(87, 23, 133, 0.1)'
+              color: 'rgba(0, 0, 0, 0.05)'
             },
             ticks: {
-              stepSize: 1
+              stepSize: 1,
+              color: '#64748b'
             }
           },
           y: {
             grid: {
               display: false
+            },
+            ticks: {
+              color: '#1f2937',
+              font: {
+                weight: '600'
+              }
             }
           }
         }
@@ -825,13 +912,14 @@
                 dashboardData.user_growth.month_counts : 
                 [0, 0, 0, 0],
           backgroundColor: [
-            'rgba(87, 23, 133, 0.8)',
-            'rgba(111, 72, 138, 0.8)',
-            'rgba(139, 74, 156, 0.8)',
-            'rgba(166, 107, 181, 0.8)'
+            'rgba(59, 130, 246, 0.8)',   // Blue
+            'rgba(96, 165, 250, 0.8)',   // Light Blue
+            'rgba(147, 197, 253, 0.8)',  // Lighter Blue
+            'rgba(191, 219, 254, 0.8)'   // Very Light Blue
           ],
-          borderRadius: 8,
-          borderSkipped: false
+          borderRadius: 10,
+          borderSkipped: false,
+          barThickness: 40
         }]
       },
       options: {
@@ -849,15 +937,25 @@
               stepSize: 1,
               callback: function(value) {
                 return Math.floor(value);
+              },
+              color: '#64748b',
+              font: {
+                weight: '600'
               }
             },
             grid: {
-              color: 'rgba(87, 23, 133, 0.1)'
+              color: 'rgba(0, 0, 0, 0.05)'
             }
           },
           x: {
             grid: {
               display: false
+            },
+            ticks: {
+              color: '#1f2937',
+              font: {
+                weight: '600'
+              }
             }
           }
         }
@@ -875,7 +973,7 @@
     createUserGrowthChart();
   }
 
-  // Fallback dummy charts if API fails
+  // standby kalau API fail keluar dummy stat
   function createDummyCharts() {
     // Revenue Chart
     new Chart(document.getElementById('revenueChart'), {
@@ -885,11 +983,13 @@
         datasets: [{
           label: 'Revenue',
           data: [12000, 15000, 18000, 14000, 22000, 25000],
-          borderColor: '#571785',
-          backgroundColor: 'rgba(87, 23, 133, 0.2)',
+          borderColor: '#10b981',
+          backgroundColor: 'rgba(16, 185, 129, 0.2)',
           borderWidth: 3,
           tension: 0.4,
-          fill: true
+          fill: true,
+          pointBackgroundColor: '#059669',
+          pointBorderColor: '#10b981'
         }]
       },
       options: {
@@ -897,26 +997,53 @@
         maintainAspectRatio: false,
         plugins: { legend: { display: false } },
         scales: {
-          y: { beginAtZero: true },
-          x: { grid: { color: 'rgba(87, 23, 133, 0.1)' } }
+          y: { 
+            beginAtZero: true,
+            grid: { color: 'rgba(16, 185, 129, 0.1)' },
+            ticks: { color: '#059669' }
+          },
+          x: { 
+            grid: { color: 'rgba(16, 185, 129, 0.1)' },
+            ticks: { color: '#059669' }
+          }
         }
       }
     });
 
     // Booking Status Chart
+    const statusColorMap = {
+      'Completed': '#10b981',   // Green
+      'Pending': '#f59e0b',     // Yellow
+      'Cancelled': '#ef4444',   // Red
+      'In Progress': '#3b82f6'  // Blue
+    };
+    
+    const dummyLabels = ['Completed', 'Pending', 'Cancelled', 'In Progress'];
+    const dummyColors = dummyLabels.map(label => statusColorMap[label]);
+    
     new Chart(document.getElementById('bookingStatusChart'), {
       type: 'doughnut',
       data: {
-        labels: ['Completed', 'Pending', 'Cancelled', 'In Progress'],
+        labels: dummyLabels,
         datasets: [{
           data: [45, 25, 15, 10],
-          backgroundColor: ['#28a745', '#ffc107', '#dc3545', '#17a2b8']
+          backgroundColor: dummyColors,
+          borderWidth: 4,
+          borderColor: '#fff'
         }]
       },
       options: {
         responsive: true,
         maintainAspectRatio: false,
-        plugins: { legend: { position: 'bottom' } }
+        plugins: { 
+          legend: { 
+            position: 'bottom',
+            labels: {
+              color: '#1f2937',
+              font: { weight: '600' }
+            }
+          } 
+        }
       }
     });
 
@@ -928,8 +1055,15 @@
         datasets: [{
           label: 'Rating',
           data: [4.8, 4.6, 4.4, 4.2, 4.0],
-          backgroundColor: 'rgba(87, 23, 133, 0.8)',
-          borderRadius: 8
+          backgroundColor: [
+            'rgba(236, 72, 153, 0.8)',
+            'rgba(139, 92, 246, 0.8)',
+            'rgba(59, 130, 246, 0.8)',
+            'rgba(16, 185, 129, 0.8)',
+            'rgba(245, 158, 11, 0.8)'
+          ],
+          borderRadius: 10,
+          barThickness: 30
         }]
       },
       options: {
@@ -937,7 +1071,18 @@
         maintainAspectRatio: false,
         indexAxis: 'y',
         plugins: { legend: { display: false } },
-        scales: { x: { beginAtZero: true, max: 5 } }
+        scales: { 
+          x: { 
+            beginAtZero: true, 
+            max: 5,
+            grid: { color: 'rgba(0, 0, 0, 0.05)' },
+            ticks: { color: '#64748b' }
+          },
+          y: {
+            grid: { display: false },
+            ticks: { color: '#1f2937', font: { weight: '600' } }
+          }
+        }
       }
     });
 
@@ -949,15 +1094,31 @@
         datasets: [{
           label: 'New Users',
           data: [25, 35, 28, 42],
-          backgroundColor: 'rgba(87, 23, 133, 0.8)',
-          borderRadius: 8
+          backgroundColor: [
+            'rgba(59, 130, 246, 0.8)',
+            'rgba(96, 165, 250, 0.8)',
+            'rgba(147, 197, 253, 0.8)',
+            'rgba(191, 219, 254, 0.8)'
+          ],
+          borderRadius: 10,
+          barThickness: 40
         }]
       },
       options: {
         responsive: true,
         maintainAspectRatio: false,
         plugins: { legend: { display: false } },
-        scales: { y: { beginAtZero: true } }
+        scales: { 
+          y: { 
+            beginAtZero: true,
+            grid: { color: 'rgba(0, 0, 0, 0.05)' },
+            ticks: { color: '#64748b', font: { weight: '600' } }
+          },
+          x: {
+            grid: { display: false },
+            ticks: { color: '#1f2937', font: { weight: '600' } }
+          }
+        }
       }
     });
   }

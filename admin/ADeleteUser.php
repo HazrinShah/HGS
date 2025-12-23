@@ -23,22 +23,47 @@ try {
     $table = $userType;
     $idColumn = $userType . 'ID';
 
-    // Delete user from table
-    $stmt = $conn->prepare("DELETE FROM {$table} WHERE {$idColumn} = ?");
-    $stmt->bind_param('i', $userID);
+    // Start transaction for safe deletion
+    $conn->begin_transaction();
 
-    if (!$stmt->execute()) {
-        throw new Exception('Database delete failed');
+    try {
+        // Delete all related records first to avoid foreign key constraints
+        
+        // Delete reviews
+        $conn->query("DELETE FROM review WHERE {$idColumn} = $userID");
+        
+        // Delete appeals
+        $conn->query("DELETE FROM appeal WHERE {$idColumn} = $userID");
+        
+        // Delete bookings
+        $conn->query("DELETE FROM booking WHERE {$idColumn} = $userID");
+        
+        // Now delete the user
+        $stmt = $conn->prepare("DELETE FROM {$table} WHERE {$idColumn} = ?");
+        $stmt->bind_param('i', $userID);
+
+        if (!$stmt->execute()) {
+            throw new Exception('Database delete failed');
+        }
+
+        if ($stmt->affected_rows === 0) {
+            throw new Exception('User not found');
+        }
+
+        // Commit transaction
+        $conn->commit();
+
+        echo json_encode([
+            'success' => true,
+            'message' => ucfirst($userType) . ' and all related data deleted successfully'
+        ]);
+
+    } catch (Exception $e) {
+        // Rollback on error
+        $conn->rollback();
+        throw $e;
     }
 
-    if ($stmt->affected_rows === 0) {
-        throw new Exception('User not found');
-    }
-
-    echo json_encode([
-        'success' => true,
-        'message' => ucfirst($userType) . ' deleted successfully'
-    ]);
 } catch (Exception $e) {
     http_response_code(500);
     echo json_encode(['error' => $e->getMessage()]);

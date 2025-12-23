@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 session_start();
 if (!isset($_SESSION['guiderID'])) {
     header("Location: GLogin.html");
@@ -40,6 +40,22 @@ if ($guiderID) {
         )
         ORDER BY b.startDate DESC
     ");
+    
+    // function untuk ambil hiker details untuk booking
+    function getHikerDetails($conn, $bookingID) {
+        $stmt = $conn->prepare("
+            SELECT hikerName, identityCard, address, phoneNumber, emergencyContactName, emergencyContactNumber
+            FROM bookinghikerdetails
+            WHERE bookingID = ?
+            ORDER BY hikerDetailID ASC
+        ");
+        $stmt->bind_param("i", $bookingID);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $details = $result->fetch_all(MYSQLI_ASSOC);
+        $stmt->close();
+        return $details;
+    }
     $stmt->bind_param("i", $guiderID);
     $stmt->execute();
     $result = $stmt->get_result();
@@ -92,7 +108,7 @@ if ($guiderID) {
     }
 }
 
-// Fetch appeals related to this guider's bookings (both hiker and guider appeals)
+// ambil appeals related dengan bookings guider ni (both hiker dan guider appeals)
 $guiderAppeals = [];
 if ($guiderID) {
     $appealStmt = $conn->prepare("
@@ -132,7 +148,7 @@ if ($guiderID) {
 if (isset($_POST['offDate']) && !isset($_POST['deleteOffDay'])) {
     $offDate = $_POST['offDate'];
 
-    // First check if this date is already an off day
+    // check dulu kalau tarikh ni dah off day
     $checkQuery = "SELECT * FROM schedule WHERE guiderID = ? AND offDate = ?";
     $stmt = $conn->prepare($checkQuery);
     $stmt->bind_param("is", $guiderID, $offDate);
@@ -140,7 +156,7 @@ if (isset($_POST['offDate']) && !isset($_POST['deleteOffDay'])) {
     $result = $stmt->get_result();
 
     if ($result->num_rows == 0) {
-        // Check if there are any existing bookings on this date
+        // check kalau ada existing bookings pada tarikh ni
         $bookingCheckQuery = "SELECT * FROM booking WHERE guiderID = ? AND startDate <= ? AND endDate >= ? AND status NOT IN ('cancelled', 'completed')";
         $stmt = $conn->prepare($bookingCheckQuery);
         $stmt->bind_param("iss", $guiderID, $offDate, $offDate);
@@ -148,7 +164,7 @@ if (isset($_POST['offDate']) && !isset($_POST['deleteOffDay'])) {
         $bookingResult = $stmt->get_result();
 
         if ($bookingResult->num_rows == 0) {
-            // No existing bookings, can set as off day
+            // takde existing bookings, boleh set sebagai off day
             $insertQuery = "INSERT INTO schedule (guiderID, offDate) VALUES (?, ?)";
             $stmt = $conn->prepare($insertQuery);
             $stmt->bind_param("is", $guiderID, $offDate);
@@ -689,23 +705,23 @@ if (isset($_SESSION['offday_booking_conflict']) && $_SESSION['offday_booking_con
     }
 
     .calendar-day.open-group {
-      background: #fef3c7;
-      color: #92400e;
-      border-color: #f59e0b;
+      background: #065f46;
+      color: #ecfdf5;
+      border-color: #10b981;
       position: relative;
     }
 
     .calendar-day.open-group:hover {
-      background: #fde68a;
-      border-color: #d97706;
+      background: #047857;
+      border-color: #059669;
     }
 
     .quota-display {
       position: absolute;
       top: 2px;
       right: 2px;
-      background: #f59e0b;
-      color: white;
+      background: #047857; 
+      color: #ecfdf5;
       font-size: 0.7rem;
       font-weight: 700;
       padding: 2px 4px;
@@ -727,13 +743,7 @@ if (isset($_SESSION['offday_booking_conflict']) && $_SESSION['offday_booking_con
       border-color: transparent;
     }
 
-    .calendar-day.today {
-      background: #fef3c7;
-      color: #92400e;
-      border-color: #f59e0b;
-      font-weight: 700;
-    }
-
+    
     .calendar-day.past {
       background: #f3f4f6 !important;
       color: rgb(99, 99, 99) !important;
@@ -786,8 +796,8 @@ if (isset($_SESSION['offday_booking_conflict']) && $_SESSION['offday_booking_con
     }
 
     .legend-open-group {
-      background: #fef3c7;
-      border-color: #f59e0b;
+      background: #065f46; /* dark green */
+      border-color: #10b981;
     }
 
     .legend-past {
@@ -1146,7 +1156,7 @@ if (isset($_SESSION['offday_booking_conflict']) && $_SESSION['offday_booking_con
       <h1 class="navbar-title mx-auto">HIKING GUIDANCE SYSTEM</h1>
 
       <!-- logo (right) -->
-      <a class="navbar-brand" href="../index.html">
+      <a class="navbar-brand" href="../index.php">
         <img src="../img/logo.png" class="img-fluid logo" alt="HGS Logo">
       </a>
     </div>
@@ -1179,7 +1189,7 @@ if (isset($_SESSION['offday_booking_conflict']) && $_SESSION['offday_booking_con
 
 <div class="main-container">
 
-  <!-- ðŸ”· Tabs -->
+  <!-- Tabs -->
   <ul class="nav nav-tabs">
     <li class="nav-item">
       <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#booking">Booking Management</button>
@@ -1192,7 +1202,7 @@ if (isset($_SESSION['offday_booking_conflict']) && $_SESSION['offday_booking_con
     </li>
   </ul>
 
-  <!-- ðŸ”½ Tab Content -->
+  <!-- Tab Content -->
   <div class="tab-content mt-2">
 
    <!-- Booking Management -->
@@ -1222,6 +1232,24 @@ if (isset($_SESSION['offday_booking_conflict']) && $_SESSION['offday_booking_con
         <!-- Booking Rows -->
         <?php if (!empty($activeBookings)): ?>
           <?php foreach ($activeBookings as $row): ?>
+            <?php
+            // Check if trip end date has passed
+            $currentDate = date('Y-m-d');
+            $endDate = date('Y-m-d', strtotime($row['endDate']));
+            $isPast = $currentDate > $endDate;
+            $isCompleted = strtoupper($row['status']) === 'COMPLETED';
+            $isCancelled = strtoupper($row['status']) === 'CANCELLED';
+            
+            // If trip is past end date or completed, show as "Trip Completed" and hide cancel button
+            $showAsCompleted = $isPast || $isCompleted;
+            $displayStatus = $showAsCompleted ? 'TRIP COMPLETED' : strtoupper($row['status']);
+            $statusClass = $showAsCompleted ? 'status-completed' : 
+                          (strtoupper($row['status']) == 'PAID' ? 'status-paid' : 
+                          (strtoupper($row['status']) == 'ACCEPTED' ? 'status-accepted' : 
+                          (strtoupper($row['status']) == 'CANCELLED' ? 'status-cancelled' : 
+                          (strtoupper($row['status']) == 'PENDING' ? 'status-pending' : ''))));
+            $canCancel = !$isCancelled && !$showAsCompleted;
+            ?>
             <div class="table-row" data-status="<?= strtoupper(htmlspecialchars($row['status'])) ?>">
               <div class="col col-bookingid"><?= htmlspecialchars($row['bookingID']) ?></div>
               <div class="col col-name"><?= htmlspecialchars($row['hikerName']) ?></div>
@@ -1230,19 +1258,15 @@ if (isset($_SESSION['offday_booking_conflict']) && $_SESSION['offday_booking_con
               <div class="col col-location"><?= htmlspecialchars($row['location']) ?></div>
               <div class="col col-amount">RM <?= number_format($row['price'], 2) ?></div>
               <div class="col col-status">
-                  <span class="status-badge 
-                    <?= strtoupper($row['status']) == 'PAID' ? 'status-paid' : 
-                        (strtoupper($row['status']) == 'ACCEPTED' ? 'status-accepted' : 
-                        (strtoupper($row['status']) == 'CANCELLED' ? 'status-cancelled' : 
-                        (strtoupper($row['status']) == 'PENDING' ? 'status-pending' : ''))) ?>">
-                    <?= strtoupper($row['status']) ?>
+                  <span class="status-badge <?= $statusClass ?>">
+                    <?= $displayStatus ?>
                   </span>
               </div>
               <div class="col col-action d-flex justify-content-center align-items-center">
                 <!-- Buttons directly inside -->
                 <button class="btn btn-details" data-bs-toggle="modal" data-bs-target="#detailsModal<?= $row['bookingID'] ?>">DETAILS</button>
 
-                <?php if (strtoupper($row['status']) !== 'CANCELLED'): ?>
+                <?php if ($canCancel): ?>
                   <button 
                     type="button" 
                     class="btn btn-cancel cancel-btn" 
@@ -1272,6 +1296,72 @@ if (isset($_SESSION['offday_booking_conflict']) && $_SESSION['offday_booking_con
                       <li class="list-group-item"><strong>Price:</strong> RM <?= number_format($row['price'], 2) ?></li>
                       <li class="list-group-item"><strong>Status:</strong> <?= strtoupper($row['status']) ?></li>
                     </ul>
+                    
+                    <?php 
+                    $hikerDetails = getHikerDetails($conn, $row['bookingID']);
+                    if (!empty($hikerDetails)): 
+                      // Prepare hiker details as JSON for print function
+                      $hikerDetailsJson = json_encode($hikerDetails);
+                    ?>
+                    <div class="mt-4">
+                      <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h6 class="mb-0" style="color: var(--guider-blue-dark); font-weight: 600;">
+                          <i class="fas fa-users me-2"></i>Hiker Details
+                        </h6>
+                        <button class="btn btn-sm btn-outline-primary btn-print-hikers" 
+                                data-booking-id="<?= $row['bookingID'] ?>"
+                                data-hiker-name="<?= htmlspecialchars($row['hikerName'], ENT_QUOTES) ?>"
+                                data-location="<?= htmlspecialchars($row['location'], ENT_QUOTES) ?>"
+                                data-start-date="<?= date("d M Y", strtotime($row['startDate'])) ?>"
+                                data-end-date="<?= date("d M Y", strtotime($row['endDate'])) ?>"
+                                data-total-hikers="<?= $row['totalHiker'] ?>"
+                                data-hiker-details="<?= htmlspecialchars($hikerDetailsJson, ENT_QUOTES, 'UTF-8') ?>">
+                          <i class="fas fa-print me-2"></i>Print Hiker Details
+                        </button>
+                      </div>
+                      <div class="accordion" id="hikerDetailsAccordion<?= $row['bookingID'] ?>">
+                        <?php foreach ($hikerDetails as $index => $hiker): ?>
+                        <div class="accordion-item mb-2">
+                          <h2 class="accordion-header" id="heading<?= $row['bookingID'] ?>_<?= $index ?>">
+                            <button class="accordion-button <?= $index > 0 ? 'collapsed' : '' ?>" type="button" data-bs-toggle="collapse" data-bs-target="#collapse<?= $row['bookingID'] ?>_<?= $index ?>" aria-expanded="<?= $index === 0 ? 'true' : 'false' ?>">
+                              <i class="fas fa-user me-2"></i>Hiker <?= $index + 1 ?>: <?= htmlspecialchars($hiker['hikerName']) ?>
+                            </button>
+                          </h2>
+                          <div id="collapse<?= $row['bookingID'] ?>_<?= $index ?>" class="accordion-collapse collapse <?= $index === 0 ? 'show' : '' ?>" aria-labelledby="heading<?= $row['bookingID'] ?>_<?= $index ?>">
+                            <div class="accordion-body">
+                              <div class="row g-3">
+                                <div class="col-md-6">
+                                  <strong>Full Name:</strong><br>
+                                  <span><?= htmlspecialchars($hiker['hikerName']) ?></span>
+                                </div>
+                                <div class="col-md-6">
+                                  <strong>Identity Card / Passport:</strong><br>
+                                  <span><?= htmlspecialchars($hiker['identityCard']) ?></span>
+                                </div>
+                                <div class="col-12">
+                                  <strong>Address:</strong><br>
+                                  <span><?= nl2br(htmlspecialchars($hiker['address'])) ?></span>
+                                </div>
+                                <div class="col-md-6">
+                                  <strong>Phone Number:</strong><br>
+                                  <span><?= htmlspecialchars($hiker['phoneNumber']) ?></span>
+                                </div>
+                                <div class="col-md-6">
+                                  <strong>Emergency Contact Name:</strong><br>
+                                  <span><?= htmlspecialchars($hiker['emergencyContactName']) ?></span>
+                                </div>
+                                <div class="col-md-6">
+                                  <strong>Emergency Contact Number:</strong><br>
+                                  <span><?= htmlspecialchars($hiker['emergencyContactNumber']) ?></span>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                        <?php endforeach; ?>
+                      </div>
+                    </div>
+                    <?php endif; ?>
                   </div>
                   <div class="modal-footer">
                     <button class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
@@ -1636,14 +1726,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     const currentDate = new Date(dateStr);
                     return currentDate >= startDate && currentDate <= endDate && booking.groupType === 'close';
                 });
-                
-                const isFullyBooked = bookings.some(booking => {
-                    const startDate = new Date(booking.startDate);
-                    const endDate = new Date(booking.endDate);
-                    const currentDate = new Date(dateStr);
-                    return currentDate >= startDate && currentDate <= endDate && booking.totalHiker >= 7;
-                });
-                
+
                 // Calculate total hikers for open group bookings on this date
                 const openGroupBookings = bookings.filter(booking => {
                     const startDate = new Date(booking.startDate);
@@ -1651,24 +1734,25 @@ document.addEventListener('DOMContentLoaded', function() {
                     const currentDate = new Date(dateStr);
                     return currentDate >= startDate && currentDate <= endDate && booking.groupType === 'open';
                 });
-                
+
                 const totalOpenHikers = openGroupBookings.reduce((sum, booking) => sum + booking.totalHiker, 0);
                 const remainingQuota = Math.max(0, 7 - totalOpenHikers);
-                
+
                 if (hasCloseGroupBooking) {
                     dayElement.classList.add('fully-booked');
                     if (isToday) dayElement.classList.add('today');
                     dayElement.title = 'Close Group Booking - Booked';
-                } else if (isFullyBooked) {
+                } else if (totalOpenHikers >= 7 || remainingQuota <= 0) {
+                    // Open group filled up counts as fully booked
                     dayElement.classList.add('fully-booked');
                     if (isToday) dayElement.classList.add('today');
-                    dayElement.title = 'Fully Booked (7 hikers)';
-                } else if (totalOpenHikers > 0) {
-                    // Open group booking with remaining quota (yellow)
+                    dayElement.title = 'Fully Booked (Open Group filled)';
+                } else if (totalOpenHikers > 0 && remainingQuota > 0) {
+                    // Open group booking with remaining quota (dark green)
                     dayElement.classList.add('open-group');
                     if (isToday) dayElement.classList.add('today');
                     dayElement.title = `Open Group - ${remainingQuota} spots left (${totalOpenHikers}/7 hikers)`;
-                    
+
                     // Add quota display
                     const quotaSpan = document.createElement('span');
                     quotaSpan.className = 'quota-display';
@@ -1940,6 +2024,309 @@ function viewAppealDetails(appeal) {
     confirmButtonText: 'Close',
     confirmButtonColor: '#6c757d'
   });
+}
+
+// Add event listeners for print buttons
+document.addEventListener('DOMContentLoaded', function() {
+  document.querySelectorAll('.btn-print-hikers').forEach(button => {
+    button.addEventListener('click', function() {
+      const bookingID = this.getAttribute('data-booking-id');
+      const hikerName = this.getAttribute('data-hiker-name');
+      const location = this.getAttribute('data-location');
+      const startDate = this.getAttribute('data-start-date');
+      const endDate = this.getAttribute('data-end-date');
+      const totalHikers = this.getAttribute('data-total-hikers');
+      const hikerDetailsJson = this.getAttribute('data-hiker-details');
+      
+      printHikerDetails(bookingID, hikerName, location, startDate, endDate, totalHikers, hikerDetailsJson);
+    });
+  });
+});
+
+// Print Hiker Details Function
+function printHikerDetails(bookingID, hikerName, location, startDate, endDate, totalHikers, hikerDetailsJson) {
+  // Parse hiker details from JSON
+  let hikerDetails = [];
+  try {
+    if (typeof hikerDetailsJson === 'string') {
+      // Handle escaped JSON in data attribute
+      hikerDetailsJson = hikerDetailsJson.replace(/&quot;/g, '"').replace(/&#039;/g, "'");
+      hikerDetails = JSON.parse(hikerDetailsJson);
+    } else {
+      hikerDetails = hikerDetailsJson;
+    }
+  } catch (e) {
+    console.error('Error parsing hiker details:', e);
+    showNotification('Error!', 'Failed to parse hiker details.', 'error');
+    return;
+  }
+  
+  if (!hikerDetails || hikerDetails.length === 0) {
+    showNotification('Error!', 'No hiker details found.', 'error');
+    return;
+  }
+  
+  // Create print window
+  const printWindow = window.open('', '_blank', 'width=900,height=700');
+  
+  // Helper function to escape HTML
+  function escapeHtml(text) {
+    if (!text) return 'N/A';
+    const map = {
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#039;'
+    };
+    return text.toString().replace(/[&<>"']/g, m => map[m]);
+  }
+  
+  // Generate table rows for hikers
+  let tableRows = '';
+  hikerDetails.forEach((hiker, index) => {
+    // Use proper field names from database (hikerName is the correct column name)
+    const hikerName = hiker.hikerName || hiker.name || 'N/A';
+    const identityCard = hiker.identityCard || 'N/A';
+    const address = (hiker.address || 'N/A').replace(/\n/g, '<br>');
+    const phoneNumber = hiker.phoneNumber || 'N/A';
+    const emergencyContactName = hiker.emergencyContactName || 'N/A';
+    const emergencyContactNumber = hiker.emergencyContactNumber || 'N/A';
+    
+    tableRows += `
+      <tr>
+        <td>${index + 1}</td>
+        <td>${escapeHtml(hikerName)}</td>
+        <td>${escapeHtml(identityCard)}</td>
+        <td>${address}</td>
+        <td>${escapeHtml(phoneNumber)}</td>
+        <td>${escapeHtml(emergencyContactName)}</td>
+        <td>${escapeHtml(emergencyContactNumber)}</td>
+      </tr>
+    `;
+  });
+  
+  // Create print content with black and white styling
+  const printContent = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>Hiker Details - Booking #${bookingID}</title>
+      <style>
+        @page { size: A4; margin: 20mm; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+          font-family: 'Times New Roman', Times, serif; 
+          font-size: 11pt; 
+          color: #000000; 
+          line-height: 1.5; 
+          background: #ffffff; 
+        }
+        .print-container {
+          max-width: 100%;
+          margin: 0 auto;
+          background: white;
+        }
+        .header { 
+          text-align: center; 
+          padding: 20px 0;
+          border-bottom: 2px solid #000000;
+          margin-bottom: 20px;
+        }
+        .logo { 
+          font-size: 18pt; 
+          font-weight: bold; 
+          margin-bottom: 5px;
+          color: #000000;
+        }
+        .document-title { 
+          font-size: 16pt; 
+          font-weight: bold;
+          margin-bottom: 5px;
+          color: #000000;
+          text-transform: uppercase;
+        }
+        .document-date {
+          font-size: 10pt;
+          color: #000000;
+        }
+        .content {
+          padding: 0;
+        }
+        .table-container {
+          margin-top: 20px;
+          width: 100%;
+        }
+        table {
+          width: 100%;
+          border-collapse: collapse;
+          margin: 15px 0;
+          font-size: 10pt;
+          border: 1px solid #000000;
+        }
+        thead {
+          background: #f0f0f0;
+        }
+        th {
+          padding: 8px 10px;
+          text-align: left;
+          font-weight: bold;
+          font-size: 10pt;
+          border: 1px solid #000000;
+          background: #f0f0f0;
+          color: #000000;
+          word-wrap: break-word;
+        }
+        th:first-child {
+          text-align: center;
+          width: 5%;
+        }
+        th:nth-child(2) {
+          width: 15%;
+        }
+        th:nth-child(3) {
+          width: 12%;
+        }
+        th:nth-child(4) {
+          width: 20%;
+        }
+        th:nth-child(5) {
+          width: 12%;
+        }
+        th:nth-child(6) {
+          width: 15%;
+        }
+        th:nth-child(7) {
+          width: 12%;
+        }
+        tbody tr:nth-child(even) {
+          background: #f9f9f9;
+        }
+        tbody tr:nth-child(odd) {
+          background: #ffffff;
+        }
+        td {
+          padding: 8px 10px;
+          border: 1px solid #000000;
+          color: #000000;
+          vertical-align: top;
+          word-wrap: break-word;
+          overflow-wrap: break-word;
+          font-size: 10pt;
+        }
+        td:first-child {
+          text-align: center;
+        }
+        .footer { 
+          margin-top: 40px;
+          padding-top: 15px;
+          border-top: 1px solid #000000;
+          text-align: center;
+          font-size: 9pt;
+          color: #000000;
+        }
+        .footer-content p {
+          margin: 3px 0;
+        }
+        .confidential {
+          font-weight: bold;
+          color: #000000;
+          margin-top: 10px;
+        }
+        @media print {
+          body { 
+            print-color-adjust: exact;
+            -webkit-print-color-adjust: exact;
+            margin: 0;
+            padding: 0;
+            background: white;
+          }
+          .print-container { 
+            box-shadow: none;
+            border-radius: 0;
+            max-width: 100%;
+            margin: 0;
+          }
+          .header {
+            page-break-after: avoid;
+          }
+          table {
+            page-break-inside: auto;
+            width: 100%;
+          }
+          tr {
+            page-break-inside: avoid;
+            page-break-after: auto;
+          }
+          thead {
+            display: table-header-group;
+          }
+          tfoot {
+            display: table-footer-group;
+          }
+        }
+      </style>
+    </head>
+    <body>
+      <div class="print-container">
+        <div class="header">
+          <div class="logo">HIKING GUIDANCE SYSTEM</div>
+          <div class="document-title">PARTICIPANT REGISTRATION DOCUMENT</div>
+          <div class="document-date">Date of Issue: ${new Date().toLocaleDateString('en-US', { 
+            year: 'numeric', 
+            month: 'long', 
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+          })}</div>
+        </div>
+        
+        <div class="content">
+          <div class="table-container">
+            <table>
+              <thead>
+                <tr>
+                  <th>No.</th>
+                  <th>Full Name</th>
+                  <th>Identity Document</th>
+                  <th>Address</th>
+                  <th>Contact Number</th>
+                  <th>Emergency Contact</th>
+                  <th>Emergency Number</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${tableRows}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        
+        <div class="footer">
+          <div class="footer-content">
+            <p><strong>Hiking Guidance System</strong> - Guider Management Portal</p>
+            <p>This is a computer-generated document. No signature required.</p>
+            <p class="confidential">CONFIDENTIAL - For Internal Use Only</p>
+          </div>
+        </div>
+      </div>
+    </body>
+    </html>
+  `;
+  
+  printWindow.document.write(printContent);
+  printWindow.document.close();
+  
+  // Wait for content to load, then print
+  printWindow.onload = function() {
+    printWindow.focus();
+    printWindow.print();
+    
+    // Close window after printing (with delay)
+    setTimeout(() => {
+      printWindow.close();
+    }, 1000);
+  };
 }
 </script>
 

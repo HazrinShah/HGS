@@ -85,9 +85,7 @@ while ($payment = $paymentResult->fetch_assoc()) {
 // Handle profile update
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_profile'])) {
     $username = $_POST['username'];
-    $email = $_POST['email'];
     $phone = $_POST['phone_number'];
-    $gender = $_POST['gender'];
 
     // Set up upload directory
     $target_dir = "../uploads/";
@@ -127,10 +125,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_profile'])) {
         }
     }
 
-    // Update query
-    $sql = "UPDATE hiker SET username=?, email=?, phone_number=?, gender=?, profile_picture=? WHERE hikerID=?";
+    // Update query - Only update username and phone_number (email and gender are permanent)
+    $sql = "UPDATE hiker SET username=?, phone_number=?, profile_picture=? WHERE hikerID=?";
     $stmt = $conn->prepare($sql);
-    $stmt->bind_param("sssssi", $username, $email, $phone, $gender, $profile_picture_path, $hikerID);
+    $stmt->bind_param("sssi", $username, $phone, $profile_picture_path, $hikerID);
     
     if ($stmt->execute()) {
         // Refresh the hiker data after update
@@ -580,7 +578,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_picture'])) {
         <span class="navbar-toggler-icon"></span>
       </button>
       <h1 class="navbar-title text-white mx-auto">HIKING GUIDANCE SYSTEM</h1>
-      <a class="navbar-brand" href="../index.html">
+      <a class="navbar-brand" href="../index.php">
         <img src="../img/logo.png" class="img-fluid logo" alt="HGS Logo">
       </a>
     </div>
@@ -735,7 +733,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_picture'])) {
             </div>
             <div class="col-md-6 mb-3">
               <label for="email" class="form-label">Email</label>
-              <input type="email" class="form-control" id="email" name="email" value="<?php echo htmlspecialchars($hiker['email']); ?>" required>
+              <input type="email" class="form-control" id="email" value="<?php echo htmlspecialchars($hiker['email']); ?>" disabled style="background-color: #e9ecef; cursor: not-allowed;">
             </div>
           </div>
           
@@ -746,12 +744,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['update_picture'])) {
             </div>
             <div class="col-md-6 mb-3">
               <label for="gender" class="form-label">Gender</label>
-              <select class="form-select" id="gender" name="gender">
-                <option value="">Select Gender</option>
-                <option value="Male" <?php echo ($hiker['gender'] == 'Male') ? 'selected' : ''; ?>>Male</option>
-                <option value="Female" <?php echo ($hiker['gender'] == 'Female') ? 'selected' : ''; ?>>Female</option>
-                <option value="Other" <?php echo ($hiker['gender'] == 'Other') ? 'selected' : ''; ?>>Other</option>
-              </select>
+              <input type="text" class="form-control" id="gender" value="<?php echo htmlspecialchars($hiker['gender'] ?? 'Not specified'); ?>" disabled style="background-color: #e9ecef; cursor: not-allowed;">
             </div>
           </div>
           
@@ -968,5 +961,8 @@ document.getElementById('profile_picture').addEventListener('change', function(e
     }
 });
 </script>
+
+<?php include_once '../AIChatbox/chatbox_include.php'; ?>
+
 </body>
 </html> 

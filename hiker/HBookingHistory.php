@@ -12,6 +12,22 @@ $hikerID = $_SESSION['hikerID'];
 // Database connection
 include '../shared/db_connection.php';
 
+// Function to fetch hiker details for a booking
+function getHikerDetails($conn, $bookingID) {
+    $stmt = $conn->prepare("
+        SELECT hikerName, identityCard, address, phoneNumber, emergencyContactName, emergencyContactNumber
+        FROM bookinghikerdetails
+        WHERE bookingID = ?
+        ORDER BY hikerDetailID ASC
+    ");
+    $stmt->bind_param("i", $bookingID);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $details = $result->fetch_all(MYSQLI_ASSOC);
+    $stmt->close();
+    return $details;
+}
+
 // Fetch completed bookings for the current user with review information
 $bookingQuery = "SELECT b.*, g.username as guiderName, g.profile_picture as guiderPicture, 
                         m.name as mountainName, m.picture as mountainPicture, m.location,
@@ -123,153 +139,178 @@ $activeTab = isset($_GET['tab']) && in_array($_GET['tab'], ['appeals','bookings'
       width: 45px;
       border-radius: 50%;
     }
-    .history-container {
-      background: var(--soft-bg);
-      max-width: 1000px;
-      margin: 0 auto;
-      padding: 2rem;
-    }
     .history-card {
-      display: flex;
-      background: var(--card-white);
-      border-radius: 16px;
-      box-shadow: 0 6px 18px rgba(30,64,175,0.08);
-      margin-bottom: 1.5rem;
-      overflow: hidden;
+      background: white;
+      border-radius: 12px;
+      border-left: 4px solid var(--guider-blue);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.06), 0 0 0 1px rgba(0,0,0,0.04);
+      padding: 1.5rem;
       transition: all 0.3s ease;
-      border: 1px solid #e2e8f0;
+      margin-bottom: 2.5rem;
+    }
+    .history-card-inner {
+      display: flex;
+      gap: 1.5rem;
+      align-items: flex-start;
+      width: 100%;
+      position: relative;
+      transition: transform 0.3s ease;
+      z-index: 1;
     }
     .history-card:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 8px 25px rgba(0,0,0,0.1);
+      box-shadow: 0 4px 16px rgba(30, 64, 175, 0.12);
+      border-left-color: var(--guider-blue-light);
+      z-index: 2;
     }
+    .history-card:hover .history-card-inner {
+      transform: translateX(4px);
+    }
+    
+    /* Compact Image - Fixed Size */
     .history-image {
-      width: 200px;
-      height: 150px;
-      background: var(--history-img);
-      position: relative;
+      width: 120px !important;
+      min-width: 120px !important;
+      max-width: 120px !important;
+      height: 120px !important;
+      min-height: 120px !important;
+      max-height: 120px !important;
+      border-radius: 10px;
       overflow: hidden;
+      background: #f1f5f9;
+      flex-shrink: 0;
+      box-sizing: border-box;
     }
     .history-image img {
       width: 100%;
       height: 100%;
       object-fit: cover;
     }
+    
+    /* Content Area */
     .history-content {
       flex: 1;
-      padding: 1.5rem;
+      min-width: 0;
       display: flex;
       flex-direction: column;
-      justify-content: space-between;
-    }
-    .history-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      margin-bottom: 1rem;
     }
     .history-title {
       font-size: 1.25rem;
-      font-weight: 600;
-      color: var(--guider-blue-dark);
-      margin: 0;
+      font-weight: 700;
+      color: #1e293b;
+      margin: 0 0 0.75rem 0;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      line-height: 1.4;
     }
-    .badge { border-radius: 12px; padding: .4rem .6rem; font-weight: 600; }
+    .history-title i {
+      color: var(--guider-blue);
+      font-size: 1.1rem;
+      flex-shrink: 0;
+    }
+    
     .history-status {
-      padding: 0.25rem 0.75rem;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.4rem 0.9rem;
+      background: #dcfce7;
+      color: #166534;
       border-radius: 20px;
       font-size: 0.75rem;
-      font-weight: 500;
+      font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 0.5px;
+      margin-bottom: 0.75rem;
+      box-shadow: 0 2px 4px rgba(34, 197, 94, 0.2);
     }
     .status-completed {
       background: #dcfce7;
       color: #166534;
     }
+    
+    /* Details */
     .history-details {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 1rem;
-      margin-bottom: 1rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1rem 1.5rem;
+      margin: 1rem 0;
+      padding: 0.75rem 0;
     }
     .detail-item {
       display: flex;
       align-items: center;
+      gap: 0.5rem;
       color: #64748b;
-      font-size: 0.9rem;
+      font-size: 0.875rem;
     }
     .detail-item i {
-      width: 16px;
-      margin-right: 0.5rem;
       color: var(--guider-blue);
+      font-size: 0.9rem;
+      width: 16px;
+      flex-shrink: 0;
     }
+    .detail-item span {
+      font-weight: 500;
+    }
+    
+    /* Footer */
     .history-footer {
       display: flex;
       justify-content: space-between;
       align-items: center;
+      margin-top: auto;
       padding-top: 1rem;
       border-top: 1px solid #e2e8f0;
+      flex-wrap: wrap;
+      gap: 1rem;
     }
     .history-price {
-      font-size: 1.1rem;
-      font-weight: 600;
+      font-size: 1.5rem;
+      font-weight: 800;
       color: var(--guider-blue-dark);
     }
     .history-actions {
       display: flex;
-      gap: 0.5rem;
+      gap: 0.75rem;
+      flex-wrap: wrap;
     }
     .btn-history {
-      padding: 0.75rem 1.5rem;
-      border-radius: 12px;
-      font-size: 1rem;
+      padding: 0.65rem 1.35rem;
+      border-radius: 8px;
       font-weight: 600;
-      text-decoration: none;
-      transition: all 0.3s ease;
+      font-size: 0.875rem;
       border: none;
       cursor: pointer;
+      transition: all 0.3s ease;
+      text-decoration: none;
+      white-space: nowrap;
       display: inline-flex;
       align-items: center;
       gap: 0.5rem;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.1);
     }
     .btn-rate {
-      background: linear-gradient(135deg, var(--guider-blue), var(--guider-blue-light));
+      background: var(--guider-blue);
       color: white;
-      border: none;
-      border-radius: 12px;
-      padding: 12px 30px;
-      font-weight: 600;
-      box-shadow: 0 4px 15px rgba(30, 64, 175, 0.3);
-      font-size: 1rem;
-      transition: all 0.3s ease;
-      text-decoration: none;
-      display: inline-block;
-      text-align: center;
-      font-family: "Montserrat", sans-serif;
     }
     .btn-rate:hover {
-      background: linear-gradient(135deg, var(--guider-blue-dark), var(--guider-blue));
+      background: var(--guider-blue-dark);
       color: white;
-      box-shadow: 0 8px 25px rgba(30, 64, 175, 0.4);
       transform: translateY(-2px);
-      text-decoration: none;
-    }
-    .btn-rate:active {
-      transform: translateY(0);
-      box-shadow: 0 2px 8px rgba(42, 82, 190, 0.3);
-    }
-    .btn-rate i {
-      font-size: 0.9rem;
+      box-shadow: 0 4px 12px rgba(30, 64, 175, 0.3);
     }
     .btn-view {
-      background: #f1f5f9;
-      color: var(--guider-blue-dark);
-      border: 1px solid #e2e8f0;
+      background: white;
+      color: var(--guider-blue);
+      border: 1.5px solid var(--guider-blue);
     }
     .btn-view:hover {
       background: var(--guider-blue-soft);
       color: var(--guider-blue-dark);
+      border-color: var(--guider-blue);
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(30, 64, 175, 0.2);
     }
     .empty-state {
       text-align: center;
@@ -311,20 +352,26 @@ $activeTab = isset($_GET['tab']) && in_array($_GET['tab'], ['appeals','bookings'
       font-size: 1.1rem;
     }
     .guider-info {
-      display: flex;
+      display: inline-flex;
       align-items: center;
-      margin-bottom: 0.5rem;
+      gap: 0.6rem;
+      margin-bottom: 0.75rem;
+      padding: 0.5rem 0.75rem;
+      background: #f8fafc;
+      border-radius: 8px;
+      border: 1px solid #e2e8f0;
     }
     .guider-avatar {
       width: 32px;
       height: 32px;
       border-radius: 50%;
-      margin-right: 0.75rem;
       overflow: hidden;
       background: var(--guider-blue-soft);
       display: flex;
       align-items: center;
       justify-content: center;
+      color: var(--guider-blue);
+      flex-shrink: 0;
     }
     .guider-avatar img {
       width: 100%;
@@ -332,34 +379,52 @@ $activeTab = isset($_GET['tab']) && in_array($_GET['tab'], ['appeals','bookings'
       object-fit: cover;
     }
     .guider-name {
-      font-weight: 500;
-      color: var(--guider-blue-dark);
+      font-weight: 600;
+      color: #475569;
+      font-size: 0.9rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 200px;
     }
     .payment-info {
-      display: flex;
+      display: inline-flex;
       align-items: center;
-      gap: 0.5rem;
+      gap: 0.4rem;
       font-size: 0.8rem;
       color: #64748b;
+      margin-top: 0.5rem;
+    }
+    .payment-info i {
+      color: var(--guider-blue);
+      font-size: 0.85rem;
     }
     .payment-type {
-      padding: 0.2rem 0.5rem;
-      border-radius: 12px;
-      background: #f1f5f9;
-      color: #475569;
+      font-weight: 600;
+      color: var(--guider-blue-dark);
+      font-size: 0.8rem;
     }
     .rating-display {
-      display: flex;
-      flex-direction: column;
+      display: inline-flex;
       align-items: center;
-      gap: 0.25rem;
+      gap: 0.5rem;
+      padding: 0.4rem 0.75rem;
+      background: #fef3c7;
+      border-radius: 6px;
+      margin-top: 0.5rem;
     }
     .rating-display .stars {
       display: flex;
-      gap: 0.1rem;
+      gap: 0.15rem;
     }
     .rating-display .stars i {
       font-size: 0.9rem;
+      color: #f59e0b;
+    }
+    .rating-display span {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: #92400e;
     }
     /* Modal Styles */
     .modal-content {
@@ -456,6 +521,70 @@ $activeTab = isset($_GET['tab']) && in_array($_GET['tab'], ['appeals','bookings'
       box-shadow: 0 8px 25px rgba(30, 64, 175, 0.4);
       color: white;
     }
+    
+    /* Responsive Design */
+    @media (max-width: 968px) {
+      .history-details {
+        grid-template-columns: 1fr;
+      }
+    }
+    
+    @media (max-width: 768px) {
+      .history-card-inner {
+        flex-direction: column;
+      }
+      .history-image {
+        width: 100% !important;
+        height: 180px !important;
+        min-width: 100% !important;
+        max-width: 100% !important;
+      }
+      .history-content {
+        max-width: 100% !important;
+      }
+      .history-title {
+        font-size: 1.1rem;
+      }
+      .history-footer {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+      .history-actions {
+        width: 100%;
+        flex-direction: column;
+      }
+      .btn-history {
+        width: 100%;
+        justify-content: center;
+      }
+    }
+    
+    @media (max-width: 480px) {
+      .history-container {
+        padding: 1rem 0.5rem;
+      }
+      .page-title {
+        font-size: 1.5rem;
+      }
+      .history-card {
+        padding: 1rem;
+        gap: 1rem;
+      }
+      .history-image {
+        width: 100px;
+        min-width: 100px;
+        height: 100px;
+      }
+      .history-title {
+        font-size: 1rem;
+      }
+      .detail-item {
+        font-size: 0.8rem;
+      }
+      .history-price {
+        font-size: 1.25rem;
+      }
+    }
   </style>
 </head>
 <body>
@@ -467,7 +596,7 @@ $activeTab = isset($_GET['tab']) && in_array($_GET['tab'], ['appeals','bookings'
           <span class="navbar-toggler-icon"></span>
         </button>
         <h1 class="navbar-title text-white mx-auto">HIKING GUIDANCE SYSTEM</h1>
-        <a class="navbar-brand" href="../index.html">
+        <a class="navbar-brand" href="../index.php">
           <img src="../img/logo.png" class="img-fluid logo" alt="HGS Logo">
         </a>
       </div>
@@ -528,38 +657,30 @@ $activeTab = isset($_GET['tab']) && in_array($_GET['tab'], ['appeals','bookings'
             <p>Processed appeals (cancelled, refunded, resolved or rejected) will appear here.</p>
           </div>
         <?php else: ?>
-          <div class="row mb-4">
+          <div class="row">
             <?php foreach ($appealHistory as $appeal): ?>
-              <div class="col-12 mb-3">
+              <div class="col-12">
                 <div class="history-card">
-                  <div class="history-image">
-                  <?php 
-                    $imgA = $appeal['mountainPicture'] ?? '';
-                    $imgA = str_replace('\\', '/', $imgA);
-                    if ($imgA === '' || $imgA === null) {
-                      $mountainSrcA = '../img/mountain-default.jpg';
-                    } elseif (strpos($imgA, 'http') === 0) {
-                      $mountainSrcA = $imgA;
-                    } elseif (strpos($imgA, '../') === 0) {
-                      $mountainSrcA = $imgA;
-                    } elseif (strpos($imgA, '/') === 0) {
-                      $mountainSrcA = '..' . $imgA; // absolute to site root
-                    } else {
-                      $mountainSrcA = '../' . $imgA; // relative path
-                    }
-                  ?>
-                  <img src="<?php echo htmlspecialchars($mountainSrcA); ?>" alt="<?php echo htmlspecialchars($appeal['mountainName']); ?>" onerror="this.src='../img/mountain-default.jpg'">
-                </div>
-                  <div class="history-content">
-                    <div class="history-header">
-                      <div>
-                        <h3 class="history-title"><?php echo htmlspecialchars($appeal['mountainName']); ?></h3>
-                        <div class="guider-info">
-                          <div class="guider-avatar"><i class="fas fa-user"></i></div>
-                          <span class="guider-name">Guider: <?php echo htmlspecialchars($appeal['guiderName']); ?></span>
-                        </div>
-                        <small class="text-muted">Appeal #<?php echo $appeal['appealID']; ?> • Updated <?php echo date('d M Y, h:i A', strtotime($appeal['updatedAt'] ?? $appeal['createdAt'])); ?></small>
-                      </div>
+                  <div class="history-card-inner">
+                    <div class="history-image">
+                    <?php 
+                      $imgA = $appeal['mountainPicture'] ?? '';
+                      $imgA = str_replace('\\', '/', $imgA);
+                      if ($imgA === '' || $imgA === null) {
+                        $mountainSrcA = '../img/mountain-default.jpg';
+                      } elseif (strpos($imgA, 'http') === 0) {
+                        $mountainSrcA = $imgA;
+                      } elseif (strpos($imgA, '../') === 0) {
+                        $mountainSrcA = $imgA;
+                      } elseif (strpos($imgA, '/') === 0) {
+                        $mountainSrcA = '..' . $imgA; // absolute to site root
+                      } else {
+                        $mountainSrcA = '../' . $imgA; // relative path
+                      }
+                    ?>
+                    <img src="<?php echo htmlspecialchars($mountainSrcA); ?>" alt="<?php echo htmlspecialchars($appeal['mountainName']); ?>" onerror="this.src='../img/mountain-default.jpg'">
+                  </div>
+                    <div class="history-content">
                       <?php 
                         $status = $appeal['status'];
                         $badge = 'bg-secondary';
@@ -568,24 +689,51 @@ $activeTab = isset($_GET['tab']) && in_array($_GET['tab'], ['appeals','bookings'
                         if ($status === 'rejected') $badge = 'bg-danger';
                         if ($status === 'cancelled') $badge = 'bg-danger';
                       ?>
-                      <span class="badge <?php echo $badge; ?>"><?php echo htmlspecialchars(ucfirst(str_replace('_',' ', $status))); ?></span>
+                      <div class="history-status" style="background: <?php 
+                        echo $status === 'refunded' ? '#fef3c7' : 
+                             ($status === 'resolved' ? '#e2e8f0' : '#fee2e2'); 
+                      ?>; color: <?php 
+                        echo $status === 'refunded' ? '#92400e' : 
+                             ($status === 'resolved' ? '#475569' : '#991b1b'); 
+                      ?>;">
+                        <i class="fas fa-<?php 
+                          echo $status === 'refunded' ? 'money-bill-wave' : 
+                               ($status === 'resolved' ? 'check-circle' : 'times-circle'); 
+                        ?>"></i><?php echo htmlspecialchars(ucfirst(str_replace('_',' ', $status))); ?>
+                      </div>
+                      <h3 class="history-title">
+                        <i class="fas fa-mountain"></i>
+                        <?php echo htmlspecialchars($appeal['mountainName']); ?>
+                      </h3>
+                      <div class="guider-info">
+                        <div class="guider-avatar"><i class="fas fa-user"></i></div>
+                        <span class="guider-name"><?php echo htmlspecialchars($appeal['guiderName']); ?></span>
+                      </div>
+                      <div class="text-muted" style="font-size: 0.85rem; margin-top: 0.5rem;">
+                        Appeal #<?php echo $appeal['appealID']; ?> • Updated <?php echo date('d M Y, h:i A', strtotime($appeal['updatedAt'] ?? $appeal['createdAt'])); ?>
+                      </div>
+                      
+                      <div class="history-details">
+                        <div class="detail-item">
+                          <i class="fas fa-calendar"></i>
+                          <span><?php echo date('d/m/Y', strtotime($appeal['startDate'])); ?> - <?php echo date('d/m/Y', strtotime($appeal['endDate'])); ?></span>
+                        </div>
+                        <div class="detail-item">
+                          <i class="fas fa-hashtag"></i>
+                          <span>Booking #<?php echo $appeal['bookingID']; ?></span>
+                        </div>
+                      </div>
+                      
+                      <?php if ($appeal['status'] === 'refunded'): ?>
+                        <div class="alert alert-warning py-2 mb-2"><i class="bi bi-currency-dollar me-1"></i>Refund will be processed within 3 working days.</div>
+                      <?php endif; ?>
+                      
+                      <?php if (!empty($appeal['reason'])): ?>
+                        <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #e2e8f0;">
+                          <div class="text-muted"><strong>Reason:</strong> <?php echo nl2br(htmlspecialchars($appeal['reason'])); ?></div>
+                        </div>
+                      <?php endif; ?>
                     </div>
-                    <div class="history-details">
-                      <div class="detail-item"><i class="fas fa-calendar"></i>
-                        <span><?php echo date('d/m/Y', strtotime($appeal['startDate'])); ?> - <?php echo date('d/m/Y', strtotime($appeal['endDate'])); ?></span>
-                      </div>
-                      <div class="detail-item"><i class="fas fa-hashtag"></i>
-                        <span>Booking #<?php echo $appeal['bookingID']; ?></span>
-                      </div>
-                    </div>
-                    <?php if ($appeal['status'] === 'refunded'): ?>
-                      <div class="alert alert-warning py-2 mb-2"><i class="bi bi-currency-dollar me-1"></i>Refund will be processed within 3 working days.</div>
-                    <?php endif; ?>
-                    <?php if (!empty($appeal['reason'])): ?>
-                      <div class="history-footer" style="border-top:none;padding-top:0;">
-                        <div class="text-muted"><strong>Reason:</strong> <?php echo nl2br(htmlspecialchars($appeal['reason'])); ?></div>
-                      </div>
-                    <?php endif; ?>
                   </div>
                 </div>
               </div>
@@ -617,7 +765,8 @@ $activeTab = isset($_GET['tab']) && in_array($_GET['tab'], ['appeals','bookings'
           <?php foreach ($bookings as $booking): ?>
             <div class="col-12">
               <div class="history-card">
-                <div class="history-image">
+                <div class="history-card-inner">
+                  <div class="history-image">
                   <?php 
                     $imgB = $booking['mountainPicture'] ?? '';
                     $imgB = str_replace('\\', '/', $imgB);
@@ -638,26 +787,25 @@ $activeTab = isset($_GET['tab']) && in_array($_GET['tab'], ['appeals','bookings'
                        onerror="this.src='../img/mountain-default.jpg'">
                 </div>
                 <div class="history-content">
-                  <div class="history-header">
-                    <div>
-                      <h3 class="history-title"><?php echo htmlspecialchars($booking['mountainName']); ?></h3>
-                      <div class="guider-info">
-                        <div class="guider-avatar">
-                          <?php if (!empty($booking['guiderPicture'])): ?>
-                            <img src="<?php echo htmlspecialchars(strpos($booking['guiderPicture'], 'http') === 0 ? $booking['guiderPicture'] : '../' . $booking['guiderPicture']); ?>" 
-                                 alt="<?php echo htmlspecialchars($booking['guiderName']); ?>"
-                                 onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
-                          <?php endif; ?>
-                          <div style="display: <?php echo empty($booking['guiderPicture']) ? 'flex' : 'none'; ?>; align-items: center; justify-content: center; width: 100%; height: 100%; background: var(--guider-blue-soft); color: var(--guider-blue);">
-                            <i class="fas fa-user"></i>
-                          </div>
-                        </div>
-                        <span class="guider-name"><?php echo htmlspecialchars($booking['guiderName']); ?></span>
+                  <div class="history-status status-completed">
+                    <i class="fas fa-check-circle"></i>Completed
+                  </div>
+                  <h3 class="history-title">
+                    <i class="fas fa-mountain"></i>
+                    <?php echo htmlspecialchars($booking['mountainName']); ?>
+                  </h3>
+                  <div class="guider-info">
+                    <div class="guider-avatar">
+                      <?php if (!empty($booking['guiderPicture'])): ?>
+                        <img src="<?php echo htmlspecialchars(strpos($booking['guiderPicture'], 'http') === 0 ? $booking['guiderPicture'] : '../' . $booking['guiderPicture']); ?>" 
+                             alt="<?php echo htmlspecialchars($booking['guiderName']); ?>"
+                             onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                      <?php endif; ?>
+                      <div style="display: <?php echo empty($booking['guiderPicture']) ? 'flex' : 'none'; ?>; align-items: center; justify-content: center; width: 100%; height: 100%;">
+                        <i class="fas fa-user"></i>
                       </div>
                     </div>
-                    <span class="history-status status-completed">
-                      <i class="fas fa-check-circle me-1"></i>Completed
-                    </span>
+                    <span class="guider-name"><?php echo htmlspecialchars($booking['guiderName']); ?></span>
                   </div>
 
                   <div class="history-details">
@@ -770,6 +918,14 @@ $activeTab = isset($_GET['tab']) && in_array($_GET['tab'], ['appeals','bookings'
             </span>
             <span class="booking-detail-value" id="modal-hikers">-</span>
           </div>
+          <div class="booking-detail-item" id="modal-hiker-details-container" style="display: none;">
+            <span class="booking-detail-label">
+              <i class="fas fa-user-friends"></i>Hiker Details
+            </span>
+            <div class="mt-2" id="modal-hiker-details-content">
+              <!-- Hiker details will be populated by JavaScript -->
+            </div>
+          </div>
           <div class="booking-detail-item">
             <span class="booking-detail-label">
               <i class="fas fa-map-marker-alt"></i>Location
@@ -844,6 +1000,49 @@ $activeTab = isset($_GET['tab']) && in_array($_GET['tab'], ['appeals','bookings'
         document.getElementById('modal-price').textContent = 'RM ' + price;
         document.getElementById('modal-payment').textContent = paymentMethod.toUpperCase();
         
+        // Fetch hiker details via AJAX
+        fetch('get_hiker_details.php?bookingID=' + bookingID)
+          .then(response => response.json())
+          .then(data => {
+            const container = document.getElementById('modal-hiker-details-container');
+            const content = document.getElementById('modal-hiker-details-content');
+            
+            if (data.success && data.hikers && data.hikers.length > 0) {
+              container.style.display = 'block';
+              let html = '<div class="accordion" id="hikerDetailsAccordion">';
+              data.hikers.forEach((hiker, index) => {
+                html += `
+                  <div class="accordion-item mb-2">
+                    <h2 class="accordion-header" id="heading${index}">
+                      <button class="accordion-button ${index > 0 ? 'collapsed' : ''}" type="button" data-bs-toggle="collapse" data-bs-target="#collapse${index}">
+                        <i class="fas fa-user me-2"></i>Hiker ${index + 1}: ${hiker.hikerName}
+                      </button>
+                    </h2>
+                    <div id="collapse${index}" class="accordion-collapse collapse ${index === 0 ? 'show' : ''}">
+                      <div class="accordion-body">
+                        <div class="row g-2 small">
+                          <div class="col-md-6"><strong>IC/Passport:</strong> ${hiker.identityCard}</div>
+                          <div class="col-md-6"><strong>Phone:</strong> ${hiker.phoneNumber}</div>
+                          <div class="col-12"><strong>Address:</strong> ${hiker.address.replace(/\n/g, '<br>')}</div>
+                          <div class="col-md-6"><strong>Emergency Contact:</strong> ${hiker.emergencyContactName}</div>
+                          <div class="col-md-6"><strong>Emergency Phone:</strong> ${hiker.emergencyContactNumber}</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                `;
+              });
+              html += '</div>';
+              content.innerHTML = html;
+            } else {
+              container.style.display = 'none';
+            }
+          })
+          .catch(error => {
+            console.error('Error fetching hiker details:', error);
+            document.getElementById('modal-hiker-details-container').style.display = 'none';
+          });
+        
         // Show review section if there's a review
         const reviewSection = document.getElementById('review-section');
         const reviewStars = document.getElementById('modal-review-stars');
@@ -892,6 +1091,9 @@ $activeTab = isset($_GET['tab']) && in_array($_GET['tab'], ['appeals','bookings'
     console.log('Booking History page JavaScript loaded successfully');
     
   </script>
+
+<?php include_once '../AIChatbox/chatbox_include.php'; ?>
+
 </body>
 </html>
 

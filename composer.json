@@ -1,0 +1,14 @@
+{
+    "name": "hgs/hiking-guidance-system",
+    "description": "Hiking Guidance System - Payment and Booking Management",
+    "type": "project",
+    "require": {
+        "phpmailer/phpmailer": "^6.9"
+    },
+    "autoload": {
+        "psr-4": {
+            "HGS\\": "shared/"
+        }
+    }
+}
+

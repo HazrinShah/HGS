@@ -1,4 +1,9 @@
 <?php
+// TEMPORARY DEBUG - Remove after fixing
+ini_set('display_errors', 1);
+ini_set('display_startup_errors', 1);
+error_reporting(E_ALL);
+
 session_start();
 
 // Check if user is logged in
@@ -13,19 +18,30 @@ $hikerID = $_SESSION['hikerID'];
 include '../shared/db_connection.php';
 
 // Fetch completed bookings for rating (excluding already rated ones)
-$completedBookingsQuery = "SELECT b.*, g.username as guiderName, g.price as guiderPrice, g.phone_number as guiderPhone, 
+// Include: 1) close group owner, 2) open group owner, 3) open group participant
+$completedBookingsQuery = "SELECT DISTINCT b.*, g.username as guiderName, g.price as guiderPrice, g.phone_number as guiderPhone, 
                          g.profile_picture as guiderPicture, g.email as guiderEmail, g.experience as guiderExperience,
                          m.name as mountainName, m.picture as mountainPicture,
                          r.rating as existingRating, r.comment as existingComment
                          FROM booking b 
                          JOIN guider g ON b.guiderID = g.guiderID 
                          JOIN mountain m ON b.mountainID = m.mountainID 
-                         LEFT JOIN review r ON b.bookingID = r.bookingID AND r.hikerID = b.hikerID
-                         WHERE b.hikerID = ? AND b.status = 'completed'
+                         LEFT JOIN bookingparticipant bp ON bp.bookingID = b.bookingID AND bp.hikerID = ?
+                         LEFT JOIN review r ON b.bookingID = r.bookingID AND r.hikerID = ?
+                         WHERE b.status = 'completed'
+                           AND (
+                             b.hikerID = ?
+                             OR
+                             (b.groupType = 'open' AND bp.hikerID IS NOT NULL)
+                           )
                          ORDER BY b.endDate DESC";
 
 $stmt = $conn->prepare($completedBookingsQuery);
-$stmt->bind_param("i", $hikerID);
+if (!$stmt) {
+    error_log("HRateReview.php - Prepare failed: " . $conn->error);
+    die("Database error: " . $conn->error);
+}
+$stmt->bind_param("iii", $hikerID, $hikerID, $hikerID);
 $stmt->execute();
 $result = $stmt->get_result();
 $allCompletedBookings = $result->fetch_all(MYSQLI_ASSOC);
@@ -75,7 +91,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['submit_rating'])) {
     $checkStmt->close();
     
     if ($existingReview) {
-        // Update existing review
         $updateQuery = "UPDATE review SET rating = ?, comment = ?, updatedAt = NOW() WHERE bookingID = ? AND hikerID = ?";
         $updateStmt = $conn->prepare($updateQuery);
         $updateStmt->bind_param("isii", $rating, $comment, $bookingID, $hikerID);
@@ -83,7 +98,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['submit_rating'])) {
         $updateStmt->close();
         $success_message = "Review updated successfully!";
     } else {
-        // Insert new review
         $insertQuery = "INSERT INTO review (bookingID, hikerID, guiderID, rating, comment, createdAt) VALUES (?, ?, ?, ?, ?, NOW())";
         $insertStmt = $conn->prepare($insertQuery);
         $insertStmt->bind_param("iiiis", $bookingID, $hikerID, $guiderID, $rating, $comment);
@@ -560,7 +574,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['submit_rating'])) {
           <span class="navbar-toggler-icon"></span>
         </button>
         <h1 class="navbar-title text-white mx-auto">HIKING GUIDANCE SYSTEM</h1>
-        <a class="navbar-brand" href="../index.html">
+        <a class="navbar-brand" href="../index.php">
           <img src="../img/logo.png" class="img-fluid logo" alt="HGS Logo">
         </a>
       </div>
@@ -921,5 +935,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['submit_rating'])) {
       }
     });
   </script>
+
+<?php include_once '../AIChatbox/chatbox_include.php'; ?>
+
 </body>
 </html>

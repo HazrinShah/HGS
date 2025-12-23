@@ -1,0 +1,37 @@
+# Composer
+/vendor/
+composer.lock
+
+# Environment and config files with sensitive data
+shared/email_config.php
+.env
+.env.local
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+php_error_log
+
+# Test files (remove in production)
+test_email.php
+
+# Uploads (keep structure but ignore content)
+/uploads/*
+!/uploads/.gitkeep
+/upload/*
+!/upload/.gitkeep
+
+# Node modules (if any)
+node_modules/
+

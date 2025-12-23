@@ -1,4 +1,9 @@
 <?php
+// TEMPORARY DEBUG - Remove after fixing
+ini_set('display_errors', 1);
+ini_set('display_startup_errors', 1);
+error_reporting(E_ALL);
+
 session_start();
 
 // Check if user is logged in
@@ -19,13 +24,26 @@ if (!$bookingID) {
 include '../shared/db_connection.php';
 
 // Fetch specific booking details
-$bookingQuery = "SELECT b.*, g.username as guiderName, g.price as guiderPrice, m.name, m.picture, m.latitude, m.longitude
+// For open groups, check bookingparticipant table; for close groups, check booking.hikerID
+$bookingQuery = "SELECT b.*, g.username as guiderName, g.price as guiderPrice, m.name, m.picture, m.latitude, m.longitude,
+                 bp.qty AS participantQty,
+                 CASE 
+                   WHEN b.groupType = 'open' THEN bp.hikerID
+                   ELSE b.hikerID
+                 END AS participantHikerID
                  FROM booking b 
                  JOIN guider g ON b.guiderID = g.guiderID 
                  JOIN mountain m ON b.mountainID = m.mountainID 
-                 WHERE b.bookingID = ? AND b.hikerID = ? AND b.status = 'pending'";
+                 LEFT JOIN bookingparticipant bp ON bp.bookingID = b.bookingID AND bp.hikerID = ?
+                 WHERE b.bookingID = ? 
+                   AND b.status = 'pending'
+                   AND (
+                     (b.groupType = 'open' AND bp.hikerID IS NOT NULL)
+                     OR
+                     (b.groupType <> 'open' AND b.hikerID = ?)
+                   )";
 $stmt = $conn->prepare($bookingQuery);
-$stmt->bind_param("ii", $bookingID, $hikerID);
+$stmt->bind_param("iii", $hikerID, $bookingID, $hikerID);
 $stmt->execute();
 $result = $stmt->get_result();
 $booking = $result->fetch_assoc();
@@ -34,6 +52,20 @@ $stmt->close();
 if (!$booking) {
     header("Location: HPayment.php");
     exit;
+}
+
+// Calculate the correct amount to display
+$displayAmount = 0;
+$isOpenGroup = ($booking['groupType'] === 'open');
+if ($isOpenGroup) {
+    // For open groups: calculate per-person price based on final group size
+    $totalHikers = max(1, (int)$booking['totalHiker']);
+    $userQty = (int)($booking['participantQty'] ?? 0);
+    $perPersonPrice = ((float)$booking['guiderPrice']) / $totalHikers;
+    $displayAmount = $perPersonPrice * $userQty;
+} else {
+    // For close groups: use the booking price
+    $displayAmount = (float)$booking['price'];
 }
 
 // Guard: if booking is pending but expired, auto-cancel and redirect back
@@ -511,7 +543,7 @@ $conn->close();
           <span class="navbar-toggler-icon"></span>
         </button>
         <h1 class="navbar-title text-white mx-auto">HIKING GUIDANCE SYSTEM</h1>
-        <a class="navbar-brand" href="../index.html">
+        <a class="navbar-brand" href="../index.php">
           <img src="../img/logo.png" class="img-fluid logo" alt="HGS Logo">
         </a>
       </div>
@@ -618,9 +650,15 @@ $conn->close();
               <span class="booking-detail-value"><?php echo date('M j, Y', strtotime($booking['endDate'])); ?></span>
             </div>
             <div class="booking-detail">
-              <span class="booking-detail-label">Number of Hikers</span>
+              <span class="booking-detail-label"><?php echo $isOpenGroup ? 'Your Hikers' : 'Number of Hikers'; ?></span>
+              <span class="booking-detail-value"><?php echo $isOpenGroup ? (int)($booking['participantQty'] ?? 0) . ' person(s)' : $booking['totalHiker'] . ' person(s)'; ?></span>
+            </div>
+            <?php if ($isOpenGroup): ?>
+            <div class="booking-detail">
+              <span class="booking-detail-label">Total Group Size</span>
               <span class="booking-detail-value"><?php echo $booking['totalHiker']; ?> person(s)</span>
             </div>
+            <?php endif; ?>
             <div class="booking-detail">
               <span class="booking-detail-label">Booking ID</span>
               <span class="booking-detail-value">#<?php echo $booking['bookingID']; ?></span>
@@ -628,8 +666,21 @@ $conn->close();
           </div>
           
           <div class="booking-price">
-            <div class="price-amount">RM <?php echo number_format($booking['price'], 2); ?></div>
-            <div class="price-label">Total Amount</div>
+            <div class="price-amount">RM <?php echo number_format($displayAmount, 2); ?></div>
+            <div class="price-label"><?php echo $isOpenGroup ? 'Your Amount' : 'Total Amount'; ?></div>
+            <?php if ($isOpenGroup): ?>
+            <div class="price-breakdown" style="margin-top: 0.5rem; font-size: 0.85rem; color: #64748b;">
+              <small>RM <?php echo number_format((float)$booking['guiderPrice'] / max(1, (int)$booking['totalHiker']), 2); ?> per person × <?php echo (int)($booking['participantQty'] ?? 0); ?> hiker(s)</small>
+            </div>
+            <?php endif; ?>
+          </div>
+          
+          <!-- Permit Notice -->
+          <div class="permit-notice" style="background: linear-gradient(135deg, #fef3c7, #fde68a); border: 1px solid #f59e0b; border-radius: 10px; padding: 0.75rem 1rem; margin-top: 1rem; display: flex; align-items: flex-start; gap: 0.75rem;">
+            <i class="fas fa-info-circle" style="color: #d97706; font-size: 1.1rem; margin-top: 0.15rem;"></i>
+            <div style="font-size: 0.85rem; color: #78350f; line-height: 1.4;">
+              <strong>Note:</strong> This payment covers the guider service only. Permit (<strong>RM10/person</strong>) must be paid at the location on hiking day.
+            </div>
           </div>
         </div>
       </div>
@@ -762,7 +813,7 @@ $conn->close();
       
       // Redirect to process_payment.php with FPX (paymentMethodID = 1)
       setTimeout(() => {
-        window.location.href = '../shared/process_payment.php?bookingID=<?php echo $bookingID; ?>&paymentMethodID=1';
+        window.location.href = '../shared/process_payment.php?bookingID=<?php echo $bookingID; ?>&paymentMethodID=1&amount=<?php echo $displayAmount; ?>';
       }, 1000);
     }
   </script>

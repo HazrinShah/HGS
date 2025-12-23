@@ -6,6 +6,9 @@ if (!isset($_SESSION['guiderID'])) {
 }
 $guiderID = $_SESSION['guiderID'];
 
+require_once '../ml_api/config.php';
+require_once '../ml_api/sentiment_guider_view.php';
+
 include '../shared/db_connection.php';
 
 // Get guider performance data
@@ -403,7 +406,7 @@ if ($guiderID) {
       <h1 class="navbar-title mx-auto">HIKING GUIDANCE SYSTEM</h1>
 
       <!-- logo (right) -->
-      <a class="navbar-brand" href="../index.html">
+      <a class="navbar-brand" href="../index.php">
         <img src="../img/logo.png" class="img-fluid logo" alt="HGS Logo">
       </a>
     </div>
@@ -507,7 +510,7 @@ if ($guiderID) {
             <div class="reviewer-info">
               <div>
                 <div class="reviewer-name"><?= htmlspecialchars($review['hikerName']) ?></div>
-                <div class="review-location"><?= htmlspecialchars($review['mountainName']) ?> â€¢ Booking #<?= $review['bookingID'] ?></div>
+                <div class="review-location"><?= htmlspecialchars($review['mountainName']) ?> Booking #<?= $review['bookingID'] ?></div>
               </div>
             </div>
             <div class="review-rating">
@@ -534,6 +537,22 @@ if ($guiderID) {
       <?php endforeach; ?>
     <?php endif; ?>
   </div>
+
+  <!-- Sentiment Analysis Section -->
+  <div class="reviews-section" style="margin-top: 2rem;">
+    <div class="reviews-header">
+      <h2 class="reviews-title">
+        <i class="fas fa-chart-line me-2"></i>
+        AI Sentiment Analysis
+      </h2>
+      <span class="badge bg-success">AI Powered</span>
+    </div>
+    <?php
+    // Display sentiment analysis for this guider
+    displayGuiderSentimentAnalysis($guiderID, $conn);
+    ?>
+  </div>
+
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>

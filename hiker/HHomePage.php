@@ -557,6 +557,42 @@ if ($conn) { $conn->close(); }
             padding: 12px 16px;
           }
         }
+
+        /* Mountain Statistics Styling */
+        .mountain-stats {
+          display: flex;
+          justify-content: space-around;
+          background: linear-gradient(135deg, #f0f9ff, #e0f2fe);
+          border-radius: 10px;
+          padding: 0.75rem 0.5rem;
+          border: 1px solid #bae6fd;
+        }
+        
+        .mountain-stats .stat-row {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 0.25rem;
+        }
+        
+        .mountain-stats .stat-icon {
+          color: var(--guider-blue);
+          font-size: 1.1rem;
+        }
+        
+        .mountain-stats .stat-value {
+          font-weight: 700;
+          color: var(--guider-blue-dark);
+          font-size: 1.1rem;
+          line-height: 1;
+        }
+        
+        .mountain-stats .stat-label {
+          font-size: 0.7rem;
+          color: #64748b;
+          text-transform: uppercase;
+          font-weight: 500;
+        }
 </style>
 </head>
 
@@ -572,7 +608,7 @@ if ($conn) { $conn->close(); }
         <span class="navbar-toggler-icon"></span>
       </button>
       <h1 class="navbar-title text-white mx-auto">HIKING GUIDANCE SYSTEM</h1>
-      <a class="navbar-brand" href="../index.html">
+      <a class="navbar-brand" href="../index.php">
         <img src="../img/logo.png" class="img-fluid logo" alt="HGS Logo">
       </a>
     </div>
@@ -618,60 +654,474 @@ if ($conn) { $conn->close(); }
     </div>
 </section>
 
+<!-- Articles moved to modal -->
 <!-- Features Section -->
 <section class="features-section">
     <div class="container">
-        <h2 class="section-title">What You Can Do</h2>
+        <h2 class="section-title">Explore</h2>
         <div class="row g-4">
             <div class="col-lg-4 col-md-6">
                 <div class="action-card">
                     <div class="icon">
                         <i class="fas fa-mountain"></i>
                     </div>
-                    <h3>Book Your Guider</h3>
-                    <p>Find and book experienced hiking guiders for your next adventure in Johor's beautiful mountains.</p>
-                    <form action="./HBooking.php">
-                        <button type="submit" class="btn btn-modern w-100">
-                            <i class="fas fa-calendar-plus me-2"></i>Book Now
-                        </button>
-                    </form>
+                    <h3>Mountains</h3>
+                    <p>Browse mountains available in the system with pictures, locations, and descriptions.</p>
+                    <a href="#mountains" class="btn btn-modern w-100">
+                        <i class="fas fa-image me-2"></i>View Mountains
+                    </a>
                 </div>
             </div>
 
             <div class="col-lg-4 col-md-6">
                 <div class="action-card">
                     <div class="icon">
-                        <i class="fas fa-user-circle"></i>
+                        <i class="fas fa-lightbulb"></i>
                     </div>
-                    <h3>Manage Profile</h3>
-                    <p>Update your personal information, payment methods, and hiking preferences.</p>
-                    <form action="./HProfile.php">
-                        <button type="submit" class="btn btn-modern w-100">
-                            <i class="fas fa-edit me-2"></i>Edit Profile
-                        </button>
-                    </form>
+                    <h3>Hiking Tips</h3>
+                    <p>Learn essential tips to hike safely and enjoyably, from packing to trail etiquette.</p>
+                    <a href="#tips" class="btn btn-modern w-100">
+                        <i class="fas fa-list-check me-2"></i>View Tips
+                    </a>
                 </div>
             </div>
 
             <div class="col-lg-4 col-md-6">
                 <div class="action-card">
                     <div class="icon">
-                        <i class="fas fa-history"></i>
+                        <i class="fas fa-newspaper"></i>
                     </div>
-                    <h3>Booking History</h3>
-                    <p>View your past hiking trips and track your adventure history with detailed records.</p>
-                    <form action="./HBookingHistory.php">
-                        <button type="submit" class="btn btn-modern w-100">
-                            <i class="fas fa-list me-2"></i>View History
-                        </button>
-                    </form>
+                    <h3>Hiking Articles</h3>
+                    <p>Read curated hiking articles and guides from trusted sources on the web.</p>
+                    <button type="button" class="btn btn-modern w-100" data-bs-toggle="modal" data-bs-target="#articlesModal">
+                        <i class="fas fa-newspaper me-2"></i>Browse Articles
+                    </button>
                 </div>
             </div>
         </div>
     </div>
 </section>
 
+<!-- Mountains Section -->
+<section id="mountains" class="welcome-section" style="scroll-margin-top: 90px;">
+    <div class="container">
+        <div class="welcome-content">
+            <h2 class="mb-4">Mountains</h2>
+            <?php
+            require '../shared/db_connection.php';
+            $mountains = [];
+            if ($conn) {
+                // Fetch mountains with booking statistics
+                $sql = "SELECT m.mountainID, m.name, m.location, m.description, m.picture, m.latitude, m.longitude,
+                               COUNT(DISTINCT b.bookingID) AS total_bookings,
+                               COALESCE(SUM(b.totalHiker), 0) AS total_hikers
+                        FROM mountain m
+                        LEFT JOIN booking b ON b.mountainID = m.mountainID AND b.status IN ('paid', 'completed')
+                        GROUP BY m.mountainID, m.name, m.location, m.description, m.picture, m.latitude, m.longitude
+                        ORDER BY m.name ASC";
+                if ($res = $conn->query($sql)) {
+                    $mountains = $res->fetch_all(MYSQLI_ASSOC);
+                    $res->close();
+                }
+                $conn->close();
+            }
+            ?>
+            <?php if (!empty($mountains)): ?>
+                <div class="row g-4 mt-2">
+                    <?php foreach ($mountains as $m): ?>
+                        <div class="col-xl-3 col-lg-4 col-md-6">
+                            <div class="card h-100 shadow-sm">
+                                <?php
+                                    $rawImg = isset($m['picture']) && $m['picture'] ? $m['picture'] : '';
+                                    $fileName = $rawImg ? basename($rawImg) : '';
+                                    $fsPath = $fileName ? dirname(__DIR__) . '/upload/' . $fileName : '';
+                                    $webPath = $fileName ? '../upload/' . $fileName : '';
+                                    $imgPath = ($fileName && file_exists($fsPath)) ? $webPath : '../img/mountain-default.jpg';
+                                ?>
+                                <img src="<?= htmlspecialchars($imgPath) ?>" onerror="this.onerror=null;this.src='../img/mountain-default.jpg';" class="card-img-top" alt="<?= htmlspecialchars($m['name']) ?>" style="height:180px; object-fit:cover;">
+                                <div class="card-body d-flex flex-column">
+                                    <h5 class="card-title mb-3" style="color: var(--guider-blue-dark);">
+                                        <?= htmlspecialchars($m['name']) ?>
+                                    </h5>
+                                    <button type="button" class="btn btn-modern mt-auto w-100" data-bs-toggle="modal" data-bs-target="#mountainModal_<?= (int)$m['mountainID'] ?>">
+                                        <i class="fas fa-eye me-2"></i>View Details
+                                    </button>
+                                    <!-- Mountain Statistics -->
+                                    <div class="mountain-stats mt-3">
+                                        <div class="stat-row">
+                                            <span class="stat-icon"><i class="fas fa-hiking"></i></span>
+                                            <span class="stat-value"><?= number_format((int)$m['total_hikers']) ?></span>
+                                            <span class="stat-label">Hikers</span>
+                                        </div>
+                                        <div class="stat-row">
+                                            <span class="stat-icon"><i class="fas fa-calendar-check"></i></span>
+                                            <span class="stat-value"><?= number_format((int)$m['total_bookings']) ?></span>
+                                            <span class="stat-label">Trips</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    <?php endforeach; ?>
+                </div>
+                <?php foreach ($mountains as $m): ?>
+                    <?php
+                        $rawImg = isset($m['picture']) && $m['picture'] ? $m['picture'] : '';
+                        $fileName = $rawImg ? basename($rawImg) : '';
+                        $fsPath = $fileName ? dirname(__DIR__) . '/upload/' . $fileName : '';
+                        $webPath = $fileName ? '../upload/' . $fileName : '';
+                        $imgPath = ($fileName && file_exists($fsPath)) ? $webPath : '../img/mountain-default.jpg';
+                        $lat = isset($m['latitude']) ? $m['latitude'] : null;
+                        $lng = isset($m['longitude']) ? $m['longitude'] : null;
+                    ?>
+                    <div class="modal fade" id="mountainModal_<?= (int)$m['mountainID'] ?>" tabindex="-1" aria-hidden="true">
+                        <div class="modal-dialog modal-lg modal-dialog-centered">
+                            <div class="modal-content">
+                                <div class="modal-header">
+                                    <h5 class="modal-title"><?= htmlspecialchars($m['name']) ?></h5>
+                                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                </div>
+                                <div class="modal-body">
+                                    <img src="<?= htmlspecialchars($imgPath) ?>" onerror="this.onerror=null;this.src='../img/mountain-default.jpg';" class="img-fluid rounded mb-3 d-block mx-auto" alt="<?= htmlspecialchars($m['name']) ?>" style="width:100%; max-width:900px; height:auto; max-height:70vh; object-fit:contain;">
+                                    <div class="mb-2"><i class="fas fa-location-dot me-2"></i><strong><?= htmlspecialchars($m['location']) ?></strong></div>
+                                    <p style="color:#374151;"><?= nl2br(htmlspecialchars($m['description'])) ?></p>
+                                    <?php if ($lat !== null && $lng !== null && $lat !== '' && $lng !== ''): ?>
+                                        <div class="ratio ratio-16x9">
+                                            <iframe src="https://maps.google.com/maps?q=<?= urlencode((string)$lat) ?>,<?= urlencode((string)$lng) ?>&z=13&output=embed" style="border:0;" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
+                                        </div>
+                                    <?php else: ?>
+                                        <div class="p-3 text-center border rounded" style="background:#f8fafc; color:#64748b;">Map location not available.</div>
+                                    <?php endif; ?>
+                                </div>
+                                <div class="modal-footer">
+                                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                <?php endforeach; ?>
+            <?php else: ?>
+                <p class="lead mb-0">No mountains available yet. Please check back later.</p>
+            <?php endif; ?>
+        </div>
+    </div>
+    </section>
+
+<!-- Tips Section -->
+<section id="tips" class="features-section" style="scroll-margin-top: 90px;">
+    <div class="container">
+        <h2 class="section-title">Hiking Tips</h2>
+        <div class="row g-4">
+            <div class="col-lg-4 col-md-6">
+                <div class="action-card">
+                    <div class="icon"><i class="fas fa-box-open"></i></div>
+                    <h3>Packing Essentials</h3>
+                    <p>Water (2L+), snacks, first-aid kit, headlamp, map/compass, rain jacket, hat, sunscreen, and fully charged phone.</p>
+                </div>
+            </div>
+            <div class="col-lg-4 col-md-6">
+                <div class="action-card">
+                    <div class="icon"><i class="fas fa-shield-halved"></i></div>
+                    <h3>Safety First</h3>
+                    <p>Check weather, tell someone your plan, stay on marked trails, pace yourself, and know your limits.</p>
+                </div>
+            </div>
+            <div class="col-lg-4 col-md-6">
+                <div class="action-card">
+                    <div class="icon"><i class="fas fa-shoe-prints"></i></div>
+                    <h3>Trail Etiquette</h3>
+                    <p>Yield to uphill hikers, leave no trace, keep noise low, and respect wildlife and other hikers.</p>
+                </div>
+            </div>
+        </div>
+        <div class="text-center mt-3">
+            <button type="button" class="btn btn-modern" data-bs-toggle="modal" data-bs-target="#tipsModal">
+                <i class="fas fa-list me-2"></i>View More
+            </button>
+        </div>
+    </div>
+</section>
+
+<div class="modal fade" id="tipsModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Hiking Tips</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" style="background: linear-gradient(135deg, #f8fafc 0%, #eef2ff 100%);">
+        <div class="container-fluid">
+          <div class="row g-4">
+            <div class="col-12">
+              <div class="p-3 bg-white rounded shadow-sm">
+                <p class="mb-0" style="color:#475569;">Practical guidance to stay safe and comfortable on the trail.</p>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <div class="p-3 bg-white rounded shadow-sm h-100">
+                <h6 class="fw-bold mb-2"><i class="fas fa-route me-2"></i>Plan & Navigation</h6>
+                <ul class="list-group list-group-flush">
+                  <li class="list-group-item"><i class="fas fa-check-circle text-success me-2"></i>Plan your route and check trail conditions.</li>
+                  <li class="list-group-item"><i class="fas fa-check-circle text-success me-2"></i>Download offline maps and bring a power bank.</li>
+                  <li class="list-group-item"><i class="fas fa-check-circle text-success me-2"></i>Share your itinerary and ETA with a friend.</li>
+                </ul>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <div class="p-3 bg-white rounded shadow-sm h-100">
+                <h6 class="fw-bold mb-2"><i class="fas fa-person-hiking me-2"></i>Clothing & Gear</h6>
+                <ul class="list-group list-group-flush">
+                  <li class="list-group-item"><i class="fas fa-check-circle text-success me-2"></i>Dress in layers; moisture-wicking base, insulating mid, waterproof outer.</li>
+                  <li class="list-group-item"><i class="fas fa-check-circle text-success me-2"></i>Proper hiking shoes/boots; consider trekking poles.</li>
+                  <li class="list-group-item"><i class="fas fa-check-circle text-success me-2"></i>Pack the ten essentials and a small first-aid kit.</li>
+                </ul>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <div class="p-3 bg-white rounded shadow-sm h-100">
+                <h6 class="fw-bold mb-2"><i class="fas fa-tint me-2"></i>Hydration & Nutrition</h6>
+                <ul class="list-group list-group-flush">
+                  <li class="list-group-item"><i class="fas fa-check-circle text-success me-2"></i>Bring 2L+ water; add electrolytes for long hikes.</li>
+                  <li class="list-group-item"><i class="fas fa-check-circle text-success me-2"></i>Snack regularly: nuts, bars, fruit.</li>
+                  <li class="list-group-item"><i class="fas fa-check-circle text-success me-2"></i>Eat a balanced meal after hiking for recovery.</li>
+                </ul>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <div class="p-3 bg-white rounded shadow-sm h-100">
+                <h6 class="fw-bold mb-2"><i class="fas fa-shield-alt me-2"></i>Safety & Etiquette</h6>
+                <ul class="list-group list-group-flush">
+                  <li class="list-group-item"><i class="fas fa-check-circle text-success me-2"></i>Start early; turn back if weather worsens.</li>
+                  <li class="list-group-item"><i class="fas fa-check-circle text-success me-2"></i>Respect wildlife; keep noise low; leave no trace.</li>
+                  <li class="list-group-item"><i class="fas fa-check-circle text-success me-2"></i>Yield to uphill hikers and be courteous on narrow trails.</li>
+                </ul>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <div class="p-3 bg-white rounded shadow-sm h-100">
+                <h6 class="fw-bold mb-2"><i class="fas fa-cloud-sun-rain me-2"></i>Weather & Timing</h6>
+                <ul class="list-group list-group-flush">
+                  <li class="list-group-item"><i class="fas fa-check-circle text-success me-2"></i>Check forecast and avoid exposed ridgelines during storms.</li>
+                  <li class="list-group-item"><i class="fas fa-check-circle text-success me-2"></i>Start before the heat; plan turnaround time to finish before dark.</li>
+                  <li class="list-group-item"><i class="fas fa-check-circle text-success me-2"></i>Bring a headlamp even on day hikes—plans can change.</li>
+                </ul>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <div class="p-3 bg-white rounded shadow-sm h-100">
+                <h6 class="fw-bold mb-2"><i class="fas fa-satellite-dish me-2"></i>Emergencies & Communication</h6>
+                <ul class="list-group list-group-flush">
+                  <li class="list-group-item"><i class="fas fa-check-circle text-success me-2"></i>Save local emergency numbers; know the trailhead address/coordinates.</li>
+                  <li class="list-group-item"><i class="fas fa-check-circle text-success me-2"></i>Carry a whistle; three blasts is a universal distress signal.</li>
+                  <li class="list-group-item"><i class="fas fa-check-circle text-success me-2"></i>In low-signal areas, pre-download maps; consider an offline GPS app.</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Stats Section -->
+<!-- Articles Modal -->
+<div class="modal fade" id="articlesModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="fas fa-newspaper me-2"></i>Hiking Articles</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" style="background: linear-gradient(135deg, #f8fafc 0%, #eef2ff 100%);">
+        <div class="container-fluid">
+          <div class="row g-4">
+            <div class="col-lg-6">
+              <div class="card h-100 shadow-sm">
+                <div class="card-body d-flex flex-column">
+                  <div class="d-flex align-items-center justify-content-between mb-2">
+                    <span class="badge text-bg-primary"><i class="fas fa-globe me-1"></i>TheSmartLocal</span>
+                    <span class="text-muted small">2025</span>
+                  </div>
+                  <h5 class="card-title">12 Nearby Hiking Trails In & Near Johor Bahru [2025]</h5>
+                  <p class="card-text" style="color:#64748b;">Menyenaraikan 12 laluan dengan tahap kesukaran, lokasi, dan tips.</p>
+                  <a href="https://www.thesmartlocal.com/read/johor-hiking-trails/" target="_blank" rel="noopener" class="btn btn-modern mt-auto">
+                    <i class="fas fa-up-right-from-square me-2"></i>Read on TheSmartLocal
+                  </a>
+                </div>
+              </div>
+            </div>
+
+            <div class="col-lg-6">
+              <div class="card h-100 shadow-sm">
+                <div class="card-body d-flex flex-column">
+                  <div class="d-flex align-items-center justify-content-between mb-2">
+                    <span class="badge text-bg-primary"><i class="fas fa-globe me-1"></i>TripZilla</span>
+                    <span class="text-muted small">23 May 2025</span>
+                  </div>
+                  <h5 class="card-title">A Guide To Johor’s Hiking Trails for Every Kind of Adventurer</h5>
+                  <p class="card-text" style="color:#64748b;">Dikelompokkan mengikut beginner, intermediate, dan challenging.</p>
+                  <a href="https://www.tripzilla.com/hiking-trails-johor-bahru-guide/163286" target="_blank" rel="noopener" class="btn btn-modern mt-auto">
+                    <i class="fas fa-up-right-from-square me-2"></i>Read on TripZilla
+                  </a>
+                </div>
+              </div>
+            </div>
+
+            <div class="col-lg-6">
+              <div class="card h-100 shadow-sm">
+                <div class="card-body d-flex flex-column">
+                  <div class="d-flex align-items-center justify-content-between mb-2">
+                    <span class="badge text-bg-primary"><i class="fas fa-globe me-1"></i>The Travel Intern</span>
+                    <span class="text-muted small">9 May 2025</span>
+                  </div>
+                  <h5 class="card-title">Kangkar Pulai JB Hiking Guide – A Secret Blue Lake near JB Sentral</h5>
+                  <p class="card-text" style="color:#64748b;">Fokus kepada laluan ke “Blue Lake” di Kangkar Pulai (Johor).</p>
+                  <a href="https://thetravelintern.com/kangkar-pulai-jb-hiking-guide-blue-lake/" target="_blank" rel="noopener" class="btn btn-modern mt-auto">
+                    <i class="fas fa-up-right-from-square me-2"></i>Read on The Travel Intern
+                  </a>
+                </div>
+              </div>
+            </div>
+
+            <div class="col-lg-6">
+              <div class="card h-100 shadow-sm">
+                <div class="card-body d-flex flex-column">
+                  <div class="d-flex align-items-center justify-content-between mb-2">
+                    <span class="badge text-bg-primary"><i class="fas fa-globe me-1"></i>CNA Lifestyle</span>
+                    <span class="text-muted small">19 Oct 2024</span>
+                  </div>
+                  <h5 class="card-title">More than just malls: Outdoor activities around JB including trails, parks, campsites</h5>
+                  <p class="card-text" style="color:#64748b;">Gambaran luas aktiviti luar & laluan hiking sekitar Johor Bahru.</p>
+                  <a href="https://cnalifestyle.channelnewsasia.com/travel/johor-bahru-jb-outdoor-activities-campsite-trails-parks-411846" target="_blank" rel="noopener" class="btn btn-modern mt-auto">
+                    <i class="fas fa-up-right-from-square me-2"></i>Read on CNA
+                  </a>
+                </div>
+              </div>
+            </div>
+
+            <div class="col-lg-6">
+              <div class="card h-100 shadow-sm">
+                <div class="card-body d-flex flex-column">
+                  <div class="d-flex align-items-center justify-content-between mb-2">
+                    <span class="badge text-bg-primary"><i class="fas fa-globe me-1"></i>Silverstreak.sg</span>
+                    <span class="text-muted small">30 Sept 2025</span>
+                  </div>
+                  <h5 class="card-title">5 Beginner-Friendly Malaysia Hiking Trails Near Johor</h5>
+                  <p class="card-text" style="color:#64748b;">Menfokuskan laluan sesuai untuk pemula di kawasan Johor.</p>
+                  <a href="https://silverstreak.sg/beginner-malaysia-hiking-trails/" target="_blank" rel="noopener" class="btn btn-modern mt-auto">
+                    <i class="fas fa-up-right-from-square me-2"></i>Read on Silverstreak
+                  </a>
+                </div>
+              </div>
+            </div>
+
+            <div class="col-lg-6">
+              <div class="card h-100 shadow-sm">
+                <div class="card-body d-flex flex-column">
+                  <div class="d-flex align-items-center justify-content-between mb-2">
+                    <span class="badge text-bg-primary"><i class="fas fa-globe me-1"></i>ShopMontigo Blog</span>
+                    <span class="text-muted small">2025</span>
+                  </div>
+                  <h5 class="card-title">Top 7 Hidden Gems and Hiking Trails in Johor</h5>
+                  <p class="card-text" style="color:#64748b;">Senaraikan Bukit Cinta, Bukit Jementah, Gunung Pulai & Blue Lake.</p>
+                  <a href="https://shopmontigo.com/blogs/news/hiking-johor" target="_blank" rel="noopener" class="btn btn-modern mt-auto">
+                    <i class="fas fa-up-right-from-square me-2"></i>Read on ShopMontigo
+                  </a>
+                </div>
+              </div>
+            </div>
+
+            <div class="col-lg-6">
+              <div class="card h-100 shadow-sm">
+                <div class="card-body d-flex flex-column">
+                  <div class="d-flex align-items-center justify-content-between mb-2">
+                    <span class="badge text-bg-primary"><i class="fas fa-globe me-1"></i>Gem Car Rental</span>
+                    <span class="text-muted small">—</span>
+                  </div>
+                  <h5 class="card-title">3 Breathtaking Hiking Trails in Johor (Beginners Friendly)</h5>
+                  <p class="card-text" style="color:#64748b;">GPS & panduan mudah: Tasik Biru Kangkar Pulai, Seri Alam Jungle Park.</p>
+                  <a href="https://www.gemcarrental.com.my/blog/3-breathtaking-hiking-trails-in-johor-beginners-friendly/" target="_blank" rel="noopener" class="btn btn-modern mt-auto">
+                    <i class="fas fa-up-right-from-square me-2"></i>Read on Gem Car Rental
+                  </a>
+                </div>
+              </div>
+            </div>
+
+            <div class="col-lg-6">
+              <div class="card h-100 shadow-sm">
+                <div class="card-body d-flex flex-column">
+                  <div class="d-flex align-items-center justify-content-between mb-2">
+                    <span class="badge text-bg-primary"><i class="fas fa-globe me-1"></i>Hikers For Life</span>
+                    <span class="text-muted small">—</span>
+                  </div>
+                  <h5 class="card-title">Gunung Pulai Trail Guide</h5>
+                  <p class="card-text" style="color:#64748b;">Trailhead, panjang laluan, masa mendaki & tahap kesukaran.</p>
+                  <a href="https://hikersforlife.com/sharemyhikes/gunung-pulai/" target="_blank" rel="noopener" class="btn btn-modern mt-auto">
+                    <i class="fas fa-up-right-from-square me-2"></i>Read Guide
+                  </a>
+                </div>
+              </div>
+            </div>
+
+            <div class="col-lg-6">
+              <div class="card h-100 shadow-sm">
+                <div class="card-body d-flex flex-column">
+                  <div class="d-flex align-items-center justify-content-between mb-2">
+                    <span class="badge text-bg-primary"><i class="fas fa-globe me-1"></i>Hikers For Life</span>
+                    <span class="text-muted small">—</span>
+                  </div>
+                  <h5 class="card-title">Bukit Mor Trail Guide</h5>
+                  <p class="card-text" style="color:#64748b;">Koordinat GPS & gambar laluan di Parit Jawa, Muar.</p>
+                  <a href="https://hikersforlife.com/sharemyhikes/bukit-mor/" target="_blank" rel="noopener" class="btn btn-modern mt-auto">
+                    <i class="fas fa-up-right-from-square me-2"></i>Read Guide
+                  </a>
+                </div>
+              </div>
+            </div>
+
+            <div class="col-lg-6">
+              <div class="card h-100 shadow-sm">
+                <div class="card-body d-flex flex-column">
+                  <div class="d-flex align-items-center justify-content-between mb-2">
+                    <span class="badge text-bg-primary"><i class="fas fa-globe me-1"></i>OutdoorActive</span>
+                    <span class="text-muted small">—</span>
+                  </div>
+                  <h5 class="card-title">Hikes in Johor</h5>
+                  <p class="card-text" style="color:#64748b;">Peta interaktif, senarai laluan mengikut daerah, jarak & ketinggian.</p>
+                  <a href="https://www.outdooractive.com/mobile/en/hikes/johor/hikes-in-johor/235904144/" target="_blank" rel="noopener" class="btn btn-modern mt-auto">
+                    <i class="fas fa-up-right-from-square me-2"></i>Explore on OutdoorActive
+                  </a>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+<?php
+// Fetch dynamic counts for stats section
+require '../shared/db_connection.php';
+$guiderCount = 0;
+$mountainCount = 0;
+if ($conn) {
+    if ($res = $conn->query("SELECT COUNT(*) AS c FROM guider")) {
+        if ($row = $res->fetch_assoc()) { $guiderCount = (int)$row['c']; }
+    }
+    if ($res = $conn->query("SELECT COUNT(*) AS c FROM mountain")) {
+        if ($row = $res->fetch_assoc()) { $mountainCount = (int)$row['c']; }
+    }
+    $conn->close();
+}
+?>
 <section class="stats-section">
     <div class="container">
         <div class="text-center">
@@ -680,12 +1130,12 @@ if ($conn) { $conn->close(); }
         </div>
         <div class="stats-grid">
             <div class="stat-card">
-                <div class="stat-number">5+</div>
+                <div class="stat-number"><?= number_format($guiderCount) ?></div>
                 <div class="stat-label">Certified Guiders</div>
             </div>
             <div class="stat-card">
-                <div class="stat-number">8+</div>
-                <div class="stat-label">Popular Mountains</div>
+                <div class="stat-number"><?= number_format($mountainCount) ?></div>
+                <div class="stat-label">Mountains</div>
             </div>
             <div class="stat-card">
                 <div class="stat-number">24/7</div>
@@ -851,6 +1301,8 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 </script>
+
+<?php include_once '../AIChatbox/chatbox_include.php'; ?>
 
 </body>
 </html>

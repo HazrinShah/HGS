@@ -24,7 +24,7 @@ if ($isGuiderLoggedIn) {
 }
 
 if (!$shouldShow) {
-    return; // Nothing to render for this role
+    return;
 }
 
 // Determine current script for page-specific behavior

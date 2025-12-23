@@ -1,6 +1,11 @@
     <?php
+// TEMPORARY DEBUG - Remove after fixing
+ini_set('display_errors', 1);
+ini_set('display_startup_errors', 1);
+error_reporting(E_ALL);
+
 session_start();
-include '../shared/db_connection.php';
+include_once '../shared/db_connection.php';
 
 // Session debug: log entry with current user and URL
 try {
@@ -24,8 +29,6 @@ $hikerID = $_SESSION['hikerID'];
 // Debug: Log successful session
 error_log("HPayment.php - User logged in with hikerID: $hikerID");
 
-
-include '../shared/db_connection.php';
  
 // auto cancel booking yang lebih masa sebab tak bayo
 // interval kene tuko kalau kau tuko masa 
@@ -56,7 +59,7 @@ $bookingQuery = "
   FROM booking b
   JOIN guider g ON b.guiderID = g.guiderID
   JOIN mountain m ON b.mountainID = m.mountainID
-  LEFT JOIN bookingParticipant bp ON bp.bookingID = b.bookingID AND bp.hikerID = ?
+  LEFT JOIN bookingparticipant bp ON bp.bookingID = b.bookingID AND bp.hikerID = ?
   WHERE b.status = 'pending'
     AND (
       (b.groupType = 'open' AND bp.hikerID IS NOT NULL)
@@ -637,7 +640,7 @@ if (count($pendingBookings) > 0) {
           <span class="navbar-toggler-icon"></span>
         </button>
         <h1 class="navbar-title text-white mx-auto">HIKING GUIDANCE SYSTEM</h1>
-        <a class="navbar-brand" href="../index.html">
+        <a class="navbar-brand" href="../index.php">
           <img src="../img/logo.png" class="img-fluid logo" alt="HGS Logo">
         </a>
       </div>
@@ -690,6 +693,17 @@ if (count($pendingBookings) > 0) {
           </a>
         </div>
       <?php else: ?>
+        <!-- Permit Notice -->
+        <div class="permit-notice" style="background: linear-gradient(135deg, #fef3c7, #fde68a); border: 2px solid #f59e0b; border-radius: 12px; padding: 1rem 1.5rem; margin-bottom: 1.5rem; display: flex; align-items: flex-start; gap: 1rem;">
+          <i class="fas fa-exclamation-triangle" style="color: #d97706; font-size: 1.5rem; margin-top: 0.25rem;"></i>
+          <div>
+            <strong style="color: #92400e; font-size: 1rem;">Important: Permit Fee Not Included</strong>
+            <p style="margin: 0.5rem 0 0 0; color: #78350f; font-size: 0.9rem; line-height: 1.5;">
+              Your booking payment covers the guider service only. A <strong>permit fee of RM10 per person</strong> is required and must be paid at guider on the day of your hike.
+            </p>
+          </div>
+        </div>
+        
         <!-- Pending Bookings -->
         <?php foreach ($pendingBookings as $booking): ?>
           <?php
@@ -776,7 +790,7 @@ if (count($pendingBookings) > 0) {
             // Authoritatively fetch the current user's participant qty for open groups (avoid stale/mismatched join data)
             $userQty = (int)($booking['participantQty'] ?? 0);
             if ($booking['groupType'] === 'open') {
-              if ($qp = $conn->prepare("SELECT qty FROM bookingParticipant WHERE bookingID = ? AND hikerID = ? LIMIT 1")) {
+              if ($qp = $conn->prepare("SELECT qty FROM bookingparticipant WHERE bookingID = ? AND hikerID = ? LIMIT 1")) {
                 $bid = (int)$booking['bookingID'];
                 $qp->bind_param('ii', $bid, $hikerID);
                 $qp->execute();
@@ -1238,7 +1252,9 @@ if (count($pendingBookings) > 0) {
           const timeLeft = payMs - now;
           if (timeLeft <= 0) {
             if (payTimer) clearInterval(payTimer);
-            el.innerHTML = '<span class="text-danger fw-bold">EXPIRED - Booking will be cancelled</span>';
+            el.innerHTML = '<span class="text-danger fw-bold">EXPIRED - Cancelling booking...</span>';
+            // Auto-cancel the booking when countdown ends
+            autoCancelBooking(bookingID);
             return;
           }
           const hours = Math.floor(timeLeft / (1000 * 60 * 60));
@@ -1332,7 +1348,88 @@ if (count($pendingBookings) > 0) {
       }
     }
 
-    // Check for payment reminders on page load (5-minute windows)
+    // Auto-cancel booking when countdown expires
+    function autoCancelBooking(bookingID) {
+      const bookingCard = document.querySelector(`[data-booking-id="${bookingID}"]`);
+      if (!bookingCard) return;
+      
+      // Check if already cancelled/processed
+      const status = (bookingCard.getAttribute('data-status') || '').toLowerCase();
+      if (status !== 'pending') return;
+      
+      // Mark as processing to prevent duplicate calls
+      bookingCard.setAttribute('data-status', 'cancelling');
+      
+      fetch('cancel_booking.php', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: `bookingID=${bookingID}`
+      })
+      .then(response => response.json())
+      .then(data => {
+        if (data.success) {
+          notificationSystem.warning('Booking Expired', `Booking #${bookingID} has been automatically cancelled due to payment deadline.`);
+          
+          // Update status in the card
+          bookingCard.setAttribute('data-status', 'cancelled');
+          bookingCard.style.opacity = '0.5';
+          bookingCard.style.pointerEvents = 'none';
+          
+          const statusEl = bookingCard.querySelector('.booking-status');
+          if (statusEl) {
+            statusEl.innerHTML = '<i class="fas fa-times-circle me-1"></i>Cancelled';
+            statusEl.className = 'booking-status text-danger';
+          }
+          
+          // Disable buttons
+          const buttons = bookingCard.querySelectorAll('button, a');
+          buttons.forEach(btn => {
+            btn.disabled = true;
+            btn.style.pointerEvents = 'none';
+            btn.style.opacity = '0.5';
+          });
+          
+          // Update modal if it's open for this booking
+          const modal = document.getElementById('bookingDetailsModal');
+          if (modal && modal.classList.contains('show')) {
+            const modalContent = document.getElementById('bookingDetailsContent');
+            if (modalContent && modalContent.innerHTML.includes(`Booking #${bookingID}`)) {
+              const countdownEl = document.getElementById(`countdown-${bookingID}`);
+              if (countdownEl) {
+                countdownEl.innerHTML = '<span class="text-danger fw-bold">EXPIRED - Booking has been cancelled</span>';
+              }
+            }
+          }
+          
+          // Remove after animation
+          setTimeout(() => {
+            bookingCard.style.transition = 'opacity 0.5s ease';
+            bookingCard.style.opacity = '0';
+            setTimeout(() => {
+              bookingCard.remove();
+              // Check if no more bookings
+              const remainingBookings = document.querySelectorAll('.booking-card[data-status="pending"]');
+              if (remainingBookings.length === 0) {
+                location.reload(); // Reload to show "no bookings" message
+              }
+            }, 500);
+          }, 2000);
+        } else {
+          // Reset status if cancellation failed
+          bookingCard.setAttribute('data-status', 'pending');
+          console.error('Auto-cancel failed:', data.message);
+        }
+      })
+      .catch(error => {
+        // Reset status if error occurred
+        bookingCard.setAttribute('data-status', 'pending');
+        console.error('Error auto-cancelling booking:', error);
+      });
+    }
+
+    // Check for payment reminders and auto-cancel expired bookings
     document.addEventListener('DOMContentLoaded', function() {
       const bookingCards = document.querySelectorAll('.booking-card');
       let hasExpiringBookings = false;
@@ -1341,6 +1438,40 @@ if (count($pendingBookings) > 0) {
       const serverNowEl = document.getElementById('server-time');
       const serverNowSec = parseInt(serverNowEl?.getAttribute('data-server-now-ts') || '0', 10);
       const nowMs = serverNowSec ? (serverNowSec * 1000) : Date.now();
+      
+      // Monitor all bookings and auto-cancel when deadline passes
+      const monitorInterval = setInterval(() => {
+        const currentCards = document.querySelectorAll('.booking-card[data-status="pending"]');
+        currentCards.forEach(card => {
+          const bookingID = card.getAttribute('data-booking-id');
+          const groupType = (card.getAttribute('data-group-type') || '').toLowerCase();
+          const status = (card.getAttribute('data-status') || '').toLowerCase();
+          if (status !== 'pending') return;
+          
+          let paySec = parseInt(card.getAttribute('data-payment-deadline-ts') || '0', 10);
+          if (groupType === 'close') {
+            const createdTs = parseInt(card.getAttribute('data-created-ts') || '0', 10);
+            if (createdTs) {
+              paySec = createdTs + (5 * 60);
+            }
+          }
+          if (!paySec) return; // No payment window yet (e.g., open group not formed)
+
+          const currentTime = Date.now();
+          const deadlineMs = paySec * 1000;
+          const remainingMs = deadlineMs - currentTime;
+          
+          // Auto-cancel if deadline has passed
+          if (remainingMs <= 0) {
+            const cardStatus = card.getAttribute('data-status');
+            if (cardStatus === 'pending') {
+              autoCancelBooking(bookingID);
+            }
+            return;
+          }
+        });
+      }, 1000); // Check every second
+
       bookingCards.forEach(card => {
         const bookingID = card.getAttribute('data-booking-id');
         const groupType = (card.getAttribute('data-group-type') || '').toLowerCase();
@@ -1356,8 +1487,12 @@ if (count($pendingBookings) > 0) {
         if (!paySec) return; // No payment window yet (e.g., open group not formed)
 
         const remainingMs = (paySec * 1000) - nowMs;
-        // Do not show an error on expiry; server will cancel if needed.
-        if (remainingMs <= 0) return;
+        // Auto-cancel if already expired
+        if (remainingMs <= 0) {
+          autoCancelBooking(bookingID);
+          return;
+        }
+        // Show warning if less than 1 minute remaining
         if (remainingMs <= 60 * 1000) {
           const secs = Math.ceil(remainingMs / 1000);
           notificationSystem.warning('Payment Deadline Approaching', `Booking #${bookingID} expires in ${secs}s. Please complete payment now.`, 20000);
@@ -1388,6 +1523,8 @@ if (count($pendingBookings) > 0) {
       document.addEventListener('DOMContentLoaded', function(){ /* no-op */ });
     })();
   </script>
+
+<?php include_once '../AIChatbox/chatbox_include.php'; ?>
 
 </body>
 </html>
