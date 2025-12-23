@@ -60,6 +60,25 @@ $result = analyzeSentiment($testReview);
 echo "<p><strong>Result:</strong></p>";
 echo "<pre>" . htmlspecialchars(json_encode($result, JSON_PRETTY_PRINT)) . "</pre>";
 
+// Test 4b: Test BATCH analysis (this is what the dashboard uses)
+echo "<h2>4b. Batch Analysis Test (Dashboard Uses This)</h2>";
+$testReviews = [
+    ['reviewID' => 1, 'comment' => 'Great guide! Very helpful.'],
+    ['reviewID' => 2, 'comment' => 'Good experience overall.']
+];
+echo "<p><strong>Test Reviews:</strong></p>";
+echo "<pre>" . htmlspecialchars(json_encode($testReviews, JSON_PRETTY_PRINT)) . "</pre>";
+
+$batchResult = analyzeGuiderReviews($testReviews);
+echo "<p><strong>Batch Result:</strong></p>";
+echo "<pre>" . htmlspecialchars(json_encode($batchResult, JSON_PRETTY_PRINT)) . "</pre>";
+
+if ($batchResult['success'] && isset($batchResult['analyzed_reviews']) && $batchResult['analyzed_reviews'] > 0) {
+    echo "<p>✅ Batch analysis working!</p>";
+} else {
+    echo "<p>❌ Batch analysis failed or returned 0 reviews. Check error above.</p>";
+}
+
 // Test 5: Check database for reviews
 echo "<h2>5. Database Review Check</h2>";
 require_once __DIR__ . '/../shared/db_connection.php';
